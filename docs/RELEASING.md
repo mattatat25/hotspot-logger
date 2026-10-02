@@ -4,9 +4,9 @@
 2. Run the checks in [Testing](TESTING.md) and require the GitHub **Test** workflow to pass.
 3. Check the GUI on a desktop and phone. Compare fresh WPSD activity and verify a real contact in QRZ.
 4. Merge the reviewed pull request.
-5. Create a GitHub release from that commit, with a matching tag such as `v0.8.0-beta.2`.
+5. Create a GitHub release from that commit, with a matching tag such as `vX.Y.Z-beta.N`.
 
-Use **Hotspot Logger 0.8.0-beta.2** as the release title and describe the user-visible changes. Keep **Set as a pre-release** enabled while the app is in beta. GitHub supplies source ZIP and tar archives automatically.
+Use **Hotspot Logger X.Y.Z-beta.N** as the release title and describe the user-visible changes. Keep **Set as a pre-release** enabled while the app is in beta. GitHub supplies source ZIP and tar archives automatically.
 
 ## Repository settings
 
