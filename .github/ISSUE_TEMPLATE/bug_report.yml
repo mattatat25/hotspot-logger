@@ -1,0 +1,37 @@
+name: Bug report
+description: Report a problem with setup, polling, or logging.
+title: ""
+body:
+  - type: markdown
+    attributes:
+      value: "Remove API keys, passwords, unrelated callsigns, and private addresses from anything you attach."
+  - type: input
+    id: logger_version
+    attributes:
+      label: Logger version
+      description: Shown in the page footer.
+      placeholder: "0.8.0-beta.2"
+    validations:
+      required: true
+  - type: input
+    id: wpsd_version
+    attributes:
+      label: WPSD version and radio mode
+      placeholder: "WPSD version, DMR / YSF / D-Star / other"
+  - type: input
+    id: platform
+    attributes:
+      label: Server and browser
+      placeholder: "Raspberry Pi OS 64-bit or Ubuntu Server; browser and version"
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include the exact error and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots or redacted API sample
+      description: A single redacted JSON object is enough for a parser issue.

@@ -1,0 +1,76 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Check shell scripts
+        run: bash -n setup.sh scripts/*.sh tests/install_smoke.sh
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+      - name: Check setup and data recovery
+        run: |
+          docker compose config --quiet
+          trap 'docker compose down -v' EXIT
+          bash setup.sh
+          python tests/container_smoke.py
+      - name: Check fresh Docker installation
+        run: |
+          docker run --rm -v "$PWD:/source:ro" ubuntu:24.04 bash /source/tests/install_smoke.sh
+          docker run --rm -v "$PWD:/source:ro" debian:trixie-slim bash /source/tests/install_smoke.sh
+
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Install browser test tools
+        run: |
+          npm install --no-save --package-lock=false playwright@1.58.2
+          npx playwright install --with-deps chromium webkit
+      - name: Check browser layouts
+        env:
+          BROWSER_OUTPUT: /tmp/hotspot-browser-results
+        run: |
+          python tests/browser_fixture.py &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid"' EXIT
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:8788/healthz >/dev/null; then break; fi
+            sleep 1
+          done
+          node tests/browser_smoke.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-screenshots
+          path: /tmp/hotspot-browser-results
+          retention-days: 7

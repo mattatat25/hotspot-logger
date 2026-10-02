@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="276" height="76" viewBox="0 0 276 76" role="img" aria-labelledby="title desc">
+  <title id="title">Created by KF0WSS</title>
+  <desc id="desc">A radio signal beside the creator's callsign.</desc>
+  <rect width="276" height="76" rx="8" fill="#111418"/>
+  <rect x=".5" y=".5" width="275" height="75" rx="7.5" fill="none" stroke="#343d47"/>
+  <g transform="translate(19 17) scale(1.2)" fill="none" stroke="#64b5c4" stroke-width="2" stroke-linecap="round">
+    <circle cx="16" cy="18" r="2" fill="#64b5c4" stroke="none"/>
+    <path d="M16 21v7M11 13a7 7 0 0 1 10 0M7 9a13 13 0 0 1 18 0M3 5a19 19 0 0 1 26 0"/>
+  </g>
+  <text x="77" y="29" fill="#a2aab4" font-family="Arial, sans-serif" font-size="11" letter-spacing="1.5">CREATED BY</text>
+  <text x="75" y="55" fill="#eef1f4" font-family="Arial, sans-serif" font-size="26" font-weight="700" letter-spacing="1">KF0WSS</text>
+</svg>

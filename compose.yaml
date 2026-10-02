@@ -1,0 +1,23 @@
+services:
+  logger:
+    build: .
+    restart: unless-stopped
+    init: true
+    volumes:
+      - logger_data:/data
+    ports:
+      - "0.0.0.0:8787:8787"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  logger_data:
