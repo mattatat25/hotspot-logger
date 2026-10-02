@@ -20,7 +20,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-VERSION = "0.8.0-beta.2"
+VERSION = "0.8.0-beta.3"
 UTC = dt.timezone.utc
 CALL = re.compile(r"^[A-Z0-9]{1,4}[0-9][A-Z0-9]{1,5}(?:/[A-Z0-9]{1,8})?$")
 DB_PATH = os.getenv("DB_PATH", "/data/logger.sqlite")
@@ -449,14 +449,49 @@ def observed_ysf_room(row, entry, settings, current_room):
     return current_room if -5 <= age <= max(60, 2 * int(settings["poll_seconds"])) else ""
 
 
+def canonical_target(mode, target):
+    target = re.sub(r"\s+at\s+.*$", "", target, flags=re.I).strip().upper()
+    if mode == "DMR":
+        match = re.fullmatch(r"(?:TG|TALKGROUP)?\s*[-:]?\s*(\d+)", target)
+        if match:
+            return match.group(1)
+    if mode == "YSF":
+        match = re.fullmatch(r"DG\s*[- ]?\s*ID\s*[-:]?\s*(\d+)", target)
+        if match:
+            return "DG-ID " + match.group(1)
+    return " ".join(target.split())
+
+
 def activity_channel(row, entry, room):
-    target = re.sub(r"\s+at\s+\S+$", "", entry[3], flags=re.I).strip().upper()
+    target = canonical_target(entry[2], entry[3])
     slot = value(row, "slot", "timeslot", "time_slot")
-    if entry[2] == "YSF" and not room:
-        return ""  # DG-ID alone cannot establish that the room stayed the same.
+    slot_number = re.search(r"\d+", slot)
+    slot = slot_number.group() if slot_number else slot.upper()
     if not target and not room:
         return ""
     return json.dumps([entry[2], target, room.upper(), slot])
+
+
+def direction_kind(raw):
+    direction = re.sub(r"[^A-Z0-9]", "", str(raw).upper())
+    if direction in ("RF", "LOCAL", "LOCALRF", "RADIO") or direction.startswith("RF") or direction.endswith("RF"):
+        return "rf"
+    if direction in ("NET", "NETWORK", "INTERNET") or "NETWORK" in direction or direction.startswith("NET"):
+        return "net"
+    return ""
+
+
+def duration_seconds(raw):
+    text = str(raw).strip()
+    if not text:
+        return None
+    numeric = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)\s*(?:s|sec|secs|second|seconds)?", text, re.I)
+    if numeric:
+        return float(numeric.group(1))
+    if re.fullmatch(r"\d{1,2}:\d{2}(?::\d{2})?", text):
+        parts = [int(part) for part in text.split(":")]
+        return float(sum(part * 60 ** index for index, part in enumerate(reversed(parts))))
+    return -1
 
 
 def possible_exchanges(activity, station):
@@ -469,18 +504,23 @@ def possible_exchanges(activity, station):
         key = (row["hotspot_id"], row["source_url"], channel)
         turns = groups.setdefault(key, [])
         own = row["call"].split("/")[0] == station.split("/")[0]
-        local = row["direction"].upper() == "RF"
-        try:
-            voice = 2 <= float(row["duration"]) <= 3600
-        except (ValueError, TypeError):
-            voice = False
-        if not voice or (own and not local) or (not own and row["direction"].upper() not in ("NET", "NETWORK", "RF")):
-            turns.clear()
+        duration = duration_seconds(row["duration"])
+        if duration == -1 or (duration is not None and not 2 <= duration <= 3600):
+            continue
+        if own and direction_kind(row["direction"]) != "rf":
+            # WPSD can show a network echo of the local callsign. Ignore it;
+            # it must not erase otherwise valid RF evidence.
             continue
         actor = station if own else row["call"]
         when = dt.datetime.fromisoformat(row["heard_utc"])
-        if turns and when <= turns[-1]["when"]:
+        if turns and when < turns[-1]["when"]:
             turns.clear()
+        if turns and when == turns[-1]["when"]:
+            if turns[-1]["actor"] == actor:
+                turns[-1]["ids"].append(row["id"])
+            else:
+                turns.clear()
+            continue
         if turns and (when - turns[-1]["when"]).total_seconds() > 300:
             turns.clear()
         if turns and turns[-1]["actor"] == actor:

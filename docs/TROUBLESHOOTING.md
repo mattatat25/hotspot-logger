@@ -71,7 +71,7 @@ If the page reports unrecognized rows, compare a redacted sample with [WPSD comp
 
 ## No possible exchanges appear
 
-A/B/A detection needs your callsign on RF, the other callsign, durations of at least two seconds, and matching channel information. YSF also needs an observed room. Your current poll limit may miss bursts in a busy room.
+A/B/A detection needs your callsign on RF, the other callsign, and matching channel information. Known durations under two seconds are ignored; a missing duration does not discard an otherwise usable WPSD row. YSF uses the observed room when available and falls back to DG-ID on that hotspot when it is not. Your current poll limit may miss bursts in a busy room.
 
 Use **All activity** and review contacts manually when evidence is incomplete. The detector never proves that someone spoke to you.
 

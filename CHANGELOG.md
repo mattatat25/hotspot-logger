@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0-beta.3
+
+- Make possible-exchange detection tolerant of WPSD direction, duration, talkgroup, timeslot, and DG-ID formatting differences.
+- Ignore network echoes and short bursts without erasing an otherwise valid A/B/A sequence.
+
 ## 0.8.0-beta.2
 
 - Add a guided Docker install for Ubuntu, Debian, and Raspberry Pi OS 64-bit.

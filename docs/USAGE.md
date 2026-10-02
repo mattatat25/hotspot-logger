@@ -85,7 +85,7 @@ The app uses valid [ADIF 3.1.7 values](https://www.adif.org/317/ADIF_317.htm). I
 | Uploaded to QRZ | QRZ returned a complete successful insert response, or you manually confirmed it after checking. |
 | Check QRZ result | The result is uncertain. Check QRZ before reopening the entry. |
 
-Possible exchanges need matching hotspot, mode, target/room, and a reported timeslot when available, with voice bursts of at least two seconds within five minutes. Network echoes of your callsign do not qualify. Polling gaps, nets, busy rooms, or missing callsigns can still produce false positives or missed exchanges. Confirm the QSO yourself.
+Possible exchanges need matching hotspot, mode, target/room, and a reported timeslot when available, within five minutes. Known bursts under two seconds and network echoes of your callsign do not qualify. When WPSD omits duration or a YSF room, the logger can still suggest a match from the remaining channel evidence. Polling gaps, nets, busy rooms, or missing callsigns can still produce false positives or missed exchanges. Confirm the QSO yourself.
 
 An upload is not a QSL confirmation. QRZ confirmation requires matching independent logs from both operators. QRZ's award rules also treat Internet/repeater contacts separately; see [confirmations](https://www.qrz.com/docs/logbook30/confirmations-how) and [award rules](https://www.qrz.com/page/qrz-operating-awards).
 

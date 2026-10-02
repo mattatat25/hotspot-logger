@@ -33,7 +33,7 @@ Add and name sources in **Settings → Hotspots**. Each has its own API URL and 
 
 YSF room fields in a feed are preferred. When a transmission only has DG-ID, the logger reads the hotspot's public dashboard and recognizes the **YSF Status → Link** panel and older **YSF Net** panels. It captures that current room only for recent activity within the greater of 60 seconds or two poll intervals. A historical row cannot establish its room from today's link. The review page marks current-room suggestions for verification rather than inventing historical room names.
 
-The supported API primarily supplies Last Heard, not a semantic QSO record. Possible-exchange detection needs your callsign on **RF**, other participants' callsigns, timestamps, durations of at least two seconds, and matching channel context. Missing data keeps an entry **Heard only**. A/B/A and B/A/B evidence is a heuristic, never an automatic QRZ upload or confirmation.
+The supported API primarily supplies Last Heard, not a semantic QSO record. Possible-exchange detection needs your callsign on **RF**, other participants' callsigns, timestamps, and matching channel context. Known bursts under two seconds are ignored. Missing duration is accepted, and YSF can fall back to DG-ID on the same hotspot when a room is unavailable. A/B/A and B/A/B evidence is a heuristic, never an automatic QRZ upload or confirmation.
 
 For duplex sources, WPSD's RX frequency is your radio's TX frequency. Keep these distinct when entering the source's frequency.
 

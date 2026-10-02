@@ -219,6 +219,47 @@ class FeatureTests(unittest.TestCase):
             with self.subTest(sample=sample):
                 self.assertEqual(app.possible_exchanges(sample, "N0CALL"), {})
 
+    def test_exchange_accepts_wpsd_format_variations_without_counting_echoes(self):
+        base = dt.datetime.now(app.UTC).replace(microsecond=0)
+        def row(identity, call, seconds, direction, duration, target):
+            raw = self.transmission(call, seconds=seconds, mode="DMR", direction=direction,
+                                    duration=duration, target=target)
+            entry = app.parse_row(raw)
+            return dict(id=identity, hotspot_id="primary", source_url="http://dmr.test/api/",
+                        call=call, channel=app.activity_channel(raw, entry, ""), direction=direction,
+                        duration=duration, heard_utc=(base - dt.timedelta(seconds=seconds)).isoformat())
+        sample = [
+            row("a", "N0CALL", 40, "Local RF", "00:08", "TG 91"),
+            row("echo", "N0CALL", 39, "Network", "", "TG91"),
+            row("b", "W0WC", 20, "Net", "8.4 s", "Talkgroup: 91"),
+            row("c", "N0CALL", 5, "RF", "", "91"),
+        ]
+        self.assertEqual({item["channel"] for item in sample}, {'["DMR", "91", "", ""]'})
+        self.assertEqual(app.possible_exchanges(sample, "N0CALL")["b"], "N0CALL → W0WC → N0CALL")
+        self.assertEqual(app.duration_seconds("1:02"), 62)
+        self.assertEqual(app.duration_seconds("1:02:03"), 3723)
+        self.assertEqual(app.duration_seconds("garbage"), -1)
+
+    def test_ysf_exchange_can_use_dg_id_when_room_is_unavailable(self):
+        own = self.transmission("N0CALL", seconds=20, direction="RF", target="DG-ID 0")
+        other = self.transmission("W0WC", seconds=10, target="DG ID: 0")
+        own_entry, other_entry = app.parse_row(own), app.parse_row(other)
+        self.assertEqual(app.activity_channel(own, own_entry, ""), '["YSF", "DG-ID 0", "", ""]')
+        self.assertEqual(app.activity_channel(other, other_entry, ""), '["YSF", "DG-ID 0", "", ""]')
+
+    def test_poll_marks_exchange_with_realistic_dmr_variations(self):
+        _, source = self.sources()
+        rows = [
+            self.transmission("N0CALL", seconds=40, mode="DMR", direction="Local RF", duration="00:08", target="TG 91"),
+            self.transmission("N0CALL", seconds=39, mode="DMR", direction="Network", duration="", target="TG91"),
+            self.transmission("W0WC", seconds=20, mode="DMR", direction="Net", duration="8.4 s", target="Talkgroup: 91"),
+            self.transmission("N0CALL", seconds=5, mode="DMR", direction="RF", duration="", target="91"),
+        ]
+        self.poll(source, rows)
+        with app.db() as cx:
+            contact = cx.execute("SELECT * FROM heard WHERE hotspot_id=? AND call='W0WC'", (source["id"],)).fetchone()
+        self.assertEqual(contact["exchange_pattern"], "N0CALL → W0WC → N0CALL")
+
     def test_gui_filters_review_frequency_protocol_and_scoped_clear(self):
         first, second = self.sources()
         self.poll(first, [self.transmission("W0WC", seconds=10)])
