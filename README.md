@@ -8,7 +8,7 @@ Hotspot Logger keeps a queue of stations heard by your hotspots. After a QSO, op
 
 Run it on an **Ubuntu VM, a Linux computer, or a Raspberry Pi with a 64-bit OS**, then use it from your desktop or phone. All logger settings are entered in the browser.
 
-**Public beta · 0.8.0-beta.4** — Created by **KF0WSS**.
+**Public beta · 0.8.0-beta.5** — Created by **[KF0WSS](https://www.qrz.com/db/KF0WSS)**.
 
 ## Install
 
@@ -48,7 +48,8 @@ QRZ uploads need a Logbook API key and an eligible subscription. You can leave t
 
 - Reads DMR, YSF/C4FM, D-Star, P25, NXDN, and FM activity; recognizes M17 from older feeds.
 - Tracks up to 16 labeled hotspots with separate frequencies and connection status.
-- Uses a desktop table and phone-friendly contact cards.
+- Opens possible exchanges first, with a separate activity queue and saved-contact view.
+- Uses a desktop table and phone-friendly contact cards, with Local and UTC clocks.
 - Matches WPSD theme colors and captures YSF room names when available.
 - Lets you review, save, delete, and export contacts.
 - Prevents resubmitting the same saved entry and holds uncertain QRZ results for you to check.

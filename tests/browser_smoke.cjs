@@ -50,6 +50,10 @@ async function fits(page) {
         assert(bounds.width > 200 && bounds.height > 50);
         await fits(page);
         assert(await page.locator('footer').innerText().then(text => text.includes('KF0WSS') && text.includes('Beta')));
+        assert(await page.getByRole('link', { name: 'Possible exchanges', exact: true }).evaluate(link => link.classList.contains('active')));
+        await page.getByRole('link', { name: 'Activity queue', exact: true }).click();
+        await page.getByRole('link', { name: 'UTC', exact: true }).click();
+        assert.equal(await page.getByRole('columnheader', { name: 'UTC time', exact: true }).count(), 1);
         await page.screenshot({ path: `${output}/${engine}-${device}-${colorScheme}.png`, fullPage: true });
         await page.getByRole('link', { name: 'Review', exact: true }).first().click();
         await fits(page);

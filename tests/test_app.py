@@ -60,6 +60,10 @@ class LoggerTests(unittest.TestCase):
         self.assertEqual(app.band_for("446.425"), "70cm")
         self.assertEqual(app.band_for("146.685"), "2m")
         self.assertEqual(app.band_for("91"), "")
+        self.assertEqual(app.display_timestamp("2026-10-03T00:25:49+00:00", "America/Chicago", "local"),
+                         ("19:25:49", "2026-10-02", "CDT"))
+        self.assertEqual(app.display_timestamp("2026-10-03T00:25:49+00:00", "America/Chicago", "utc"),
+                         ("00:25:49", "2026-10-03", "UTC"))
 
     def test_first_run_gui_setup_and_how_to(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -77,11 +81,13 @@ class LoggerTests(unittest.TestCase):
                     self.assertIn("Admin → Configuration", page)
                     self.assertIn("My Logbook → Settings → API", page)
                     self.assertIn("manual.wpsd.radio/advanced/api", page)
+                    self.assertIn("Local time zone", page)
                     token = re.search(r"name='csrf' value='([^']+)'", page).group(1)
                     form = {
                         "csrf": token, "station_callsign": "N0CALL",
                         "wpsd_url": "http://192.168.1.50/api/", "rf_freq_mhz": "446.425",
                         "wpsd_timezone": "UTC", "poll_seconds": "10", "poll_limit": "40",
+                        "display_timezone": "America/Chicago", "display_time_mode": "local",
                         "qrz_api_key": "TEST-KEY", "password": "testing-password-123456",
                         "password_confirm": "testing-password-123456",
                     }
@@ -118,6 +124,7 @@ class LoggerTests(unittest.TestCase):
                         "csrf": settings_token, "station_callsign": "N0CALL",
                         "wpsd_url": "http://192.168.1.50/api/", "rf_freq_mhz": "446.450",
                         "wpsd_timezone": "UTC", "poll_seconds": "15", "poll_limit": "75",
+                        "display_timezone": "America/Chicago", "display_time_mode": "local",
                         "qrz_api_key": "", "password": "", "password_confirm": "",
                     }
                     update_request = urllib.request.Request(f"http://{host}/settings",
@@ -135,6 +142,7 @@ class LoggerTests(unittest.TestCase):
                     updated = app.get_settings()
                     self.assertEqual(updated["rf_freq_mhz"], "446.450")
                     self.assertEqual(updated["qrz_api_key"], "TEST-KEY")
+                    self.assertEqual(updated["display_timezone"], "America/Chicago")
                 finally:
                     server.shutdown()
                     server.server_close()
@@ -191,7 +199,7 @@ class LoggerTests(unittest.TestCase):
                     with urllib.request.urlopen(request) as response:
                         return response.read().decode()
 
-                dashboard = get("/")
+                dashboard = get("/?view=queue")
                 self.assertIn("Clear queue", dashboard)
                 self.assertIn("Delete", dashboard)
                 self.assertIn("Latest 50 entries in this view", dashboard)
@@ -301,7 +309,7 @@ class LoggerTests(unittest.TestCase):
                 try:
                     health = urllib.request.urlopen(f"http://{host}/healthz")
                     self.assertEqual(json.loads(health.read())["version"], app.VERSION)
-                    get = urllib.request.Request(f"http://{host}/", headers={"Authorization": auth})
+                    get = urllib.request.Request(f"http://{host}/?view=queue", headers={"Authorization": auth})
                     with urllib.request.urlopen(get) as response:
                         page = response.read().decode()
                     self.assertIn("W1ABC", page)
@@ -322,6 +330,9 @@ class LoggerTests(unittest.TestCase):
                     with app.db() as cx:
                         self.assertIsNone(cx.execute("SELECT logged_at FROM heard WHERE id=?", (row[0],)).fetchone()[0])
                     with urllib.request.urlopen(request) as response:
+                        self.assertIn("Possible exchanges", response.read().decode())
+                    saved = urllib.request.Request(f"http://{host}/?view=saved", headers={"Authorization": auth})
+                    with urllib.request.urlopen(saved) as response:
                         self.assertIn("Saved for ADIF", response.read().decode())
                     with app.db() as cx:
                         stored = cx.execute("SELECT log_status,log_adif FROM heard WHERE id=?", (row[0],)).fetchone()

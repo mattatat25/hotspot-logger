@@ -20,7 +20,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-VERSION = "0.8.0-beta.4"
+VERSION = "0.8.0-beta.5"
 ACTIVITY_LIMIT = 50
 UTC = dt.timezone.utc
 CALL = re.compile(r"^[A-Z0-9]{1,4}[0-9][A-Z0-9]{1,5}(?:/[A-Z0-9]{1,8})?$")
@@ -32,6 +32,7 @@ CONFIG_CHANGED = threading.Event()
 BOOTSTRAP_SECRET = secrets.token_urlsafe(32)
 THEME_CACHES = {}
 SOURCE_STATUS = {}
+EXCHANGE_REBUILDS = {}
 MODE_SPECS = {
     "YSF": ("DIGITALVOICE", "C4FM"), "DMR": ("DIGITALVOICE", "DMR"),
     "D-Star": ("DIGITALVOICE", "DSTAR"), "P25": ("DIGITALVOICE", ""),
@@ -43,15 +44,19 @@ DEFAULTS = {
     "wpsd_url": "http://wpsd.local/api/",
     "rf_freq_mhz": "",
     "wpsd_timezone": "UTC",
+    "display_timezone": "UTC",
+    "display_time_mode": "local",
     "qrz_api_key": "",
     "poll_seconds": "10",
     "poll_limit": "40",
+    "queue_retention_days": "7",
     "theme_mode": "wpsd",
     "hotspots": "[]",
     "password_hash": "",
     "csrf_secret": "",
 }
-CREATOR_CREDIT = "<span class='creator-credit'>Created by <strong>KF0WSS</strong></span>"
+CREATOR_CREDIT = ("<span class='creator-credit'>Created by "
+                  "<a href='https://www.qrz.com/db/KF0WSS' target='_blank' rel='noopener noreferrer'><strong>KF0WSS</strong></a></span>")
 
 
 def page_footer(note=""):
@@ -198,19 +203,31 @@ def save_configuration(form, initial=False):
         identities.add(hotspot["id"])
     wpsd_url, frequency = hotspots[0]["url"], hotspots[0]["freq"]
 
-    timezone = form.get("wpsd_timezone", "UTC").strip()
+    timezone = form.get("wpsd_timezone", current["wpsd_timezone"]).strip()
     try:
         ZoneInfo(timezone)
     except (ZoneInfoNotFoundError, ValueError):
         raise ValueError("Enter an IANA time zone such as UTC or America/Chicago") from None
 
+    display_timezone = form.get("display_timezone", current["display_timezone"]).strip()
+    try:
+        ZoneInfo(display_timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ValueError("Enter a valid local time zone such as America/Chicago") from None
+    display_time_mode = form.get("display_time_mode", current["display_time_mode"])
+    if display_time_mode not in ("local", "utc"):
+        raise ValueError("Choose Local or UTC as the default clock")
+
     try:
         poll_seconds = int(form.get("poll_seconds", "10"))
         poll_limit = int(form.get("poll_limit", "40"))
+        queue_retention_days = int(form.get("queue_retention_days", current["queue_retention_days"]))
     except ValueError:
         raise ValueError("Polling values must be numbers") from None
     if not 5 <= poll_seconds <= 300 or not 10 <= poll_limit <= 200:
         raise ValueError("Choose a poll interval from 5–300 seconds and a row limit from 10–200")
+    if queue_retention_days not in (1, 3, 7, 14, 30):
+        raise ValueError("Choose a queue retention period from the list")
     theme_mode = form.get("theme_mode", current["theme_mode"])
     if theme_mode not in ("wpsd", "logger"):
         raise ValueError("Choose Match WPSD or Logger default for the theme")
@@ -241,9 +258,12 @@ def save_configuration(form, initial=False):
         "wpsd_url": wpsd_url,
         "rf_freq_mhz": frequency,
         "wpsd_timezone": timezone,
+        "display_timezone": display_timezone,
+        "display_time_mode": display_time_mode,
         "qrz_api_key": selected_qrz_key,
         "poll_seconds": str(poll_seconds),
         "poll_limit": str(poll_limit),
+        "queue_retention_days": str(queue_retention_days),
         "theme_mode": theme_mode,
         "hotspots": json.dumps(hotspots),
         "password_hash": encoded_password,
@@ -302,6 +322,14 @@ def timestamp(raw, timezone="UTC"):
         return result.astimezone(UTC)
     except (ValueError, OverflowError):
         return None
+
+
+def display_timestamp(raw, timezone="UTC", clock="utc"):
+    instant = dt.datetime.fromisoformat(raw)
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=UTC)
+    shown = instant.astimezone(ZoneInfo(timezone) if clock == "local" else UTC)
+    return shown.strftime("%H:%M:%S"), shown.strftime("%Y-%m-%d"), shown.tzname() or "UTC"
 
 
 def extract_rows(payload):
@@ -496,8 +524,8 @@ def duration_seconds(raw):
 
 
 def possible_exchanges(activity, station):
-    """Consecutive A/B/A or B/A/B bursts; evidence, not QSO confirmation."""
-    groups, matches = {}, {}
+    """Return one candidate per continuous A/B/A or B/A/B conversation."""
+    groups, matches, session_ends = {}, {}, {}
     for row in activity:
         channel = row["channel"]
         if not channel:
@@ -533,9 +561,16 @@ def possible_exchanges(activity, station):
         if len(turns) == 3 and turns[0]["actor"] == turns[2]["actor"] and station in (turns[0]["actor"], turns[1]["actor"]):
             if (turns[2]["when"] - turns[0]["when"]).total_seconds() <= 300:
                 pattern = " → ".join(turn["actor"] for turn in turns)
-                for turn in turns:
-                    if turn["actor"] != station:
-                        matches.update({identity: pattern for identity in turn["ids"]})
+                other_turn = next(turn for turn in turns if turn["actor"] != station)
+                session_key = (key, other_turn["actor"])
+                previous_end = session_ends.get(session_key)
+                if previous_end is None or (turns[0]["when"] - previous_end).total_seconds() > 300:
+                    # Use the first transmission from the other station as the
+                    # review row and QSO start-time suggestion. The remaining
+                    # bursts stay visible in Activity queue without becoming
+                    # duplicate possible contacts.
+                    matches[other_turn["ids"][0]] = pattern
+                session_ends[session_key] = turns[2]["when"]
     return matches
 
 
@@ -597,15 +632,29 @@ def poll_once(settings=None):
         cx.executemany("UPDATE activity SET channel=? WHERE id=? AND channel=''",
                        [(entry[4], entry[0]) for entry in activity if entry[4]])
         if activity:
-            lower = (min(dt.datetime.fromisoformat(entry[6]) for entry in activity) - dt.timedelta(seconds=300)).isoformat()
-            upper = (max(dt.datetime.fromisoformat(entry[6]) for entry in activity) + dt.timedelta(seconds=300)).isoformat()
-            evidence = cx.execute("SELECT * FROM activity WHERE hotspot_id=? AND source_url=? AND heard_utc BETWEEN ? AND ? ORDER BY heard_utc,id",
-                                  (settings["hotspot_id"], url, lower, upper)).fetchall()
+            rebuild_key = (settings["hotspot_id"], url)
+            if rebuild_key not in EXCHANGE_REBUILDS:
+                # Rebuild retained evidence once per process so upgrading also
+                # clears duplicate flags created by earlier beta versions.
+                evidence = cx.execute("SELECT * FROM activity WHERE hotspot_id=? AND source_url=? ORDER BY heard_utc,id",
+                                      rebuild_key).fetchall()
+                cx.execute("UPDATE heard SET exchange_pattern='' WHERE hotspot_id=? AND logged_at IS NULL",
+                           (settings["hotspot_id"],))
+                EXCHANGE_REBUILDS[rebuild_key] = True
+            else:
+                lower = (min(dt.datetime.fromisoformat(entry[6]) for entry in activity) - dt.timedelta(seconds=300)).isoformat()
+                upper = (max(dt.datetime.fromisoformat(entry[6]) for entry in activity) + dt.timedelta(seconds=300)).isoformat()
+                evidence = cx.execute("SELECT * FROM activity WHERE hotspot_id=? AND source_url=? AND heard_utc BETWEEN ? AND ? ORDER BY heard_utc,id",
+                                      (*rebuild_key, lower, upper)).fetchall()
+                cx.execute("""UPDATE heard SET exchange_pattern='' WHERE logged_at IS NULL AND id IN
+                    (SELECT id FROM activity WHERE hotspot_id=? AND source_url=? AND heard_utc BETWEEN ? AND ?)""",
+                           (*rebuild_key, lower, upper))
             matches = possible_exchanges(evidence, settings["station_callsign"])
             cx.executemany("UPDATE heard SET exchange_pattern=? WHERE id=? AND logged_at IS NULL",
                            [(pattern, identity) for identity, pattern in matches.items()])
-        cx.execute("DELETE FROM activity WHERE heard_utc < ?", ((dt.datetime.now(UTC)-dt.timedelta(days=14)).isoformat(),))
-        cx.execute("DELETE FROM heard WHERE logged_at IS NULL AND first_seen < ?", ((dt.datetime.now(UTC)-dt.timedelta(days=14)).isoformat(),))
+        retention_cutoff = (dt.datetime.now(UTC)-dt.timedelta(days=int(settings["queue_retention_days"]))).isoformat()
+        cx.execute("DELETE FROM activity WHERE heard_utc < ?", (retention_cutoff,))
+        cx.execute("DELETE FROM heard WHERE logged_at IS NULL AND first_seen < ?", (retention_cutoff,))
     status["last_ok"] = dt.datetime.now(UTC).isoformat()
     STATUS.update(last_ok=status["last_ok"], error=status["error"])
     return len(parsed)
@@ -709,10 +758,10 @@ def qrz_insert(adif, key, station):
 
 CSS = """<style>
 :root{color-scheme:dark;--bg:#111418;--card:#191e24;--card2:#20262d;--line:#343d47;--text:#eef1f4;--muted:#a2aab4;--accent:#64b5c4;--accentText:#101418;--field:#14191f;--blue:#9cc9d4;--warn:#e6bd73;--warnBg:#332b1f}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,sans-serif}a{color:var(--blue)}button,input,select{font:inherit}button,.linkbtn{display:inline-block;padding:7px 12px;border:1px solid var(--accent);border-radius:4px;background:var(--accent);color:var(--accentText);font-weight:600;text-decoration:none;cursor:pointer}.secondary{background:transparent;border-color:var(--line);color:var(--text)}.danger{background:transparent!important;border-color:#a65460!important;color:#ecadb5!important}button:disabled{opacity:.45;cursor:not-allowed}.shell{max-width:1480px;margin:auto;padding:24px 32px}.site-header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:20px;border-bottom:1px solid var(--line)}h1{font-size:23px;font-weight:650;letter-spacing:-.4px;margin:0}h2{font-size:17px;font-weight:600;margin:0 0 12px}p{margin:8px 0}.brand-kicker{font-size:12px;color:var(--muted)}.header-actions,.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.muted,time,.field-help{color:var(--muted);font-size:12px}.source-strip{display:flex;gap:18px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:12px 0;color:var(--muted);font-size:12px}.source-strip strong{color:var(--text);font-weight:600}.source-strip .error{color:var(--warn)}.summary-line{display:flex;gap:28px;flex-wrap:wrap;padding:20px 0;font-size:13px}.summary-line strong{font-size:17px;font-variant-numeric:tabular-nums;margin-right:6px}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}.tabs{display:flex;gap:18px;align-items:center}.tabs a{color:var(--muted);text-decoration:none;padding:7px 0;border-bottom:2px solid transparent}.tabs a.active{color:var(--text);border-color:var(--accent)}.filters{display:flex;gap:7px;align-items:center;margin:0}.filters select{width:auto;max-width:230px;padding:6px 9px}.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:4px}table{border-collapse:collapse;width:100%;text-align:left;background:var(--card)}th{background:var(--card2);color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}th,td{padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:middle}tr:last-child td{border-bottom:0}tbody tr:hover{background:var(--card2)}td .small{display:block;color:var(--muted);font-size:11px;line-height:1.6}.call{font-size:15px;font-weight:650;white-space:nowrap}.mode{font-size:12px;white-space:nowrap}.row-actions{display:flex;gap:12px;align-items:center;white-space:nowrap}.row-actions a{text-decoration:none;font-size:12px}.row-actions .delete{color:#ecadb5}.state{font-size:12px}.state.possible,.state.saved{color:var(--blue)}.state.pending{color:var(--warn)}.empty{padding:34px 18px;text-align:center;color:var(--muted)}.context{margin:13px 0;color:var(--muted);font-size:12px}footer{margin-top:26px;color:var(--muted);font-size:11px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.notice{padding:11px 13px;border:1px solid var(--line);background:var(--card2);border-radius:4px;margin:16px 0}.notice.ok{border-left:3px solid var(--accent)}.setup-shell{max-width:1000px;margin:auto;padding:30px 24px}.setup-header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:24px;gap:16px}.setup-card{padding:22px 0;margin:0}.setup-grid,.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0}.setup-grid label,.grid label,.hotspot-fields label{display:flex;flex-direction:column;gap:5px;font-size:12px}.wide{grid-column:1/-1}input,select{width:100%;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--field);color:var(--text)}input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px}.help-box{font-size:12px;color:var(--muted);line-height:1.6;margin:8px 0 15px}.field-help{font-size:11px}.checkbox{display:flex!important;flex-direction:row!important;align-items:center;gap:8px!important}.checkbox input{width:auto}.hotspot-row{border:1px solid var(--line);border-radius:4px;padding:16px;margin:12px 0;background:var(--card)}.hotspot-row legend{padding:0 6px;font-size:12px;color:var(--muted)}.hotspot-fields{display:grid;grid-template-columns:1fr 2fr 1fr;gap:12px}.hotspot-row .remove-hotspot{margin-top:12px;font-size:11px;padding:4px 8px}.setup-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--line);margin-top:24px;padding-top:18px}.section-rule{border:0;border-top:1px solid var(--line);margin:26px 0}.review-meta{display:flex;gap:22px;flex-wrap:wrap;font-size:13px;color:var(--muted);padding:16px 0;border-bottom:1px solid var(--line)}.review-meta strong{color:var(--text)}.review-note{font-size:12px;color:var(--muted);margin:16px 0}code{font-size:12px;overflow-wrap:anywhere}.setup-shell .actions{margin-top:20px}
-.brand-logo{display:block;width:300px;max-width:100%;height:auto;background:#fff;border-radius:4px;padding:8px;margin-bottom:8px}.beta{display:inline-block;border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:5px;color:var(--text)}.independence{flex-basis:100%}.creator-credit{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,sans-serif}a{color:var(--blue)}button,input,select{font:inherit}button,.linkbtn{display:inline-block;padding:7px 12px;border:1px solid var(--accent);border-radius:4px;background:var(--accent);color:var(--accentText);font-weight:600;text-decoration:none;cursor:pointer}.secondary{background:transparent;border-color:var(--line);color:var(--text)}.danger{background:transparent!important;border-color:#a65460!important;color:#ecadb5!important}button:disabled{opacity:.45;cursor:not-allowed}.shell{max-width:1480px;margin:auto;padding:24px 32px}.site-header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:20px;border-bottom:1px solid var(--line)}h1{font-size:23px;font-weight:650;letter-spacing:-.4px;margin:0}h2{font-size:17px;font-weight:600;margin:0 0 12px}p{margin:8px 0}.brand-kicker{font-size:12px;color:var(--muted)}.header-actions,.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.muted,time,.field-help{color:var(--muted);font-size:12px}.source-strip{display:flex;gap:18px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:12px 0;color:var(--muted);font-size:12px}.source-strip strong{color:var(--text);font-weight:600}.source-strip .error{color:var(--warn)}.summary-line{display:flex;gap:28px;flex-wrap:wrap;padding:20px 0;font-size:13px}.summary-line strong{font-size:17px;font-variant-numeric:tabular-nums;margin-right:6px}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}.tabs{display:flex;gap:18px;align-items:center}.tabs a{color:var(--muted);text-decoration:none;padding:7px 0;border-bottom:2px solid transparent}.tabs a.active{color:var(--text);border-color:var(--accent)}.toolbar-controls,.filters,.clock-toggle{display:flex;gap:7px;align-items:center}.toolbar-controls,.filters{margin:0}.clock-toggle{border:1px solid var(--line);border-radius:4px;padding:2px}.clock-toggle a{color:var(--muted);padding:4px 8px;text-decoration:none;border-radius:2px;font-size:12px}.clock-toggle a.active{background:var(--card2);color:var(--text)}.filters select{width:auto;max-width:230px;padding:6px 9px}.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:4px}table{border-collapse:collapse;width:100%;text-align:left;background:var(--card)}th{background:var(--card2);color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}th,td{padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:middle}tr:last-child td{border-bottom:0}tbody tr:hover{background:var(--card2)}td .small{display:block;color:var(--muted);font-size:11px;line-height:1.6}.call{font-size:15px;font-weight:650;white-space:nowrap}.mode{font-size:12px;white-space:nowrap}.row-actions{display:flex;gap:12px;align-items:center;white-space:nowrap}.row-actions a{text-decoration:none;font-size:12px}.row-actions .delete{color:#ecadb5}.state{font-size:12px}.state.possible,.state.saved{color:var(--blue)}.state.pending{color:var(--warn)}.empty{padding:34px 18px;text-align:center;color:var(--muted)}.context{margin:13px 0;color:var(--muted);font-size:12px}footer{margin-top:26px;color:var(--muted);font-size:11px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.notice{padding:11px 13px;border:1px solid var(--line);background:var(--card2);border-radius:4px;margin:16px 0}.notice.ok{border-left:3px solid var(--accent)}.setup-shell{max-width:1000px;margin:auto;padding:30px 24px}.setup-header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:24px;gap:16px}.setup-card{padding:22px 0;margin:0}.setup-grid,.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0}.setup-grid label,.grid label,.hotspot-fields label{display:flex;flex-direction:column;gap:5px;font-size:12px}.wide{grid-column:1/-1}input,select{width:100%;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--field);color:var(--text)}input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px}.help-box{font-size:12px;color:var(--muted);line-height:1.6;margin:8px 0 15px}.field-help{font-size:11px}.checkbox{display:flex!important;flex-direction:row!important;align-items:center;gap:8px!important}.checkbox input{width:auto}.hotspot-row{border:1px solid var(--line);border-radius:4px;padding:16px;margin:12px 0;background:var(--card)}.hotspot-row legend{padding:0 6px;font-size:12px;color:var(--muted)}.hotspot-fields{display:grid;grid-template-columns:1fr 2fr 1fr;gap:12px}.hotspot-row .remove-hotspot{margin-top:12px;font-size:11px;padding:4px 8px}.setup-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--line);margin-top:24px;padding-top:18px}.section-rule{border:0;border-top:1px solid var(--line);margin:26px 0}.review-meta{display:flex;gap:22px;flex-wrap:wrap;font-size:13px;color:var(--muted);padding:16px 0;border-bottom:1px solid var(--line)}.review-meta strong{color:var(--text)}.review-note{font-size:12px;color:var(--muted);margin:16px 0}code{font-size:12px;overflow-wrap:anywhere}.setup-shell .actions{margin-top:20px}
+.brand-logo{display:block;width:300px;max-width:100%;height:auto;background:#fff;border-radius:4px;padding:8px;margin-bottom:8px}.beta{display:inline-block;border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:5px;color:var(--text)}.independence{flex-basis:100%}.creator-credit{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.creator-credit a{color:inherit;text-decoration:none}
 @media(max-width:850px){.shell{padding:16px}.hotspot-fields{grid-template-columns:1fr 1fr}.hotspot-fields .hotspot-url{grid-column:1/-1;grid-row:2}.table-wrap{border:0;overflow:visible}thead{display:none}table,tbody,tr,td{display:block}tbody tr{border:1px solid var(--line);border-radius:4px;padding:9px 13px;margin-bottom:10px;background:var(--card)}td{border:0;padding:4px 0;display:grid;grid-template-columns:92px 1fr;gap:8px}td:before{content:attr(data-label);font-size:11px;color:var(--muted);font-weight:400}.row-actions{margin:2px 0}.toolbar{align-items:flex-start}.source-strip{gap:9px}.summary-line{gap:18px;padding:16px 0}}
-@media(max-width:560px){.site-header{align-items:flex-start;flex-direction:column;gap:12px;padding-bottom:15px}h1{font-size:21px}.header-actions{gap:6px}.header-actions .linkbtn{font-size:12px;padding:6px 9px}.setup-shell{padding:18px 15px}.setup-grid,.grid,.hotspot-fields{grid-template-columns:1fr}.hotspot-fields .hotspot-url{grid-column:auto;grid-row:auto}.wide{grid-column:auto}.filters{flex-wrap:wrap}.filters select{max-width:170px}.tabs{gap:15px;font-size:12px}.setup-actions{align-items:stretch;flex-direction:column-reverse}.setup-header{align-items:flex-start}.hotspot-row{padding:12px}.summary-line strong{font-size:15px}.review-meta{gap:12px}}
+@media(max-width:560px){.site-header{align-items:flex-start;flex-direction:column;gap:12px;padding-bottom:15px}h1{font-size:21px}.header-actions{gap:6px}.header-actions .linkbtn{font-size:12px;padding:6px 9px}.setup-shell{padding:18px 15px}.setup-grid,.grid,.hotspot-fields{grid-template-columns:1fr}.hotspot-fields .hotspot-url{grid-column:auto;grid-row:auto}.wide{grid-column:auto}.toolbar-controls,.filters{flex-wrap:wrap}.toolbar-controls{width:100%}.filters select{max-width:170px}.tabs{gap:15px;font-size:12px}.setup-actions{align-items:stretch;flex-direction:column-reverse}.setup-header{align-items:flex-start}.hotspot-row{padding:12px}.summary-line strong{font-size:15px}.review-meta{gap:12px}}
 @media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#f6f7f8;--card:#fff;--card2:#f0f2f4;--line:#d7dce1;--text:#242b32;--muted:#626c77;--accent:#286b78;--accentText:#fff;--field:#fff;--blue:#286b78;--warn:#8c600e;--warnBg:#fff5df}.danger,.row-actions .delete{color:#963340!important}}
 </style>"""
 
@@ -850,7 +899,12 @@ def setup_page(settings, edit=False, error="", saved=False):
     template = hotspot_fields({"id": "", "label": "", "url": "", "freq": ""}, "__INDEX__")
     poll_options = "".join(option(value, settings["poll_seconds"], f"{value} seconds") for value in (5, 10, 15, 30, 60))
     limit_options = "".join(option(value, settings["poll_limit"]) for value in (20, 40, 75, 100, 200))
+    retention_options = "".join(option(value, settings["queue_retention_days"], f"{value} day{'s' if value != 1 else ''}") for value in (1, 3, 7, 14, 30))
     theme_options = option("wpsd", settings["theme_mode"], "Match WPSD") + option("logger", settings["theme_mode"], "Logger default")
+    clock_options = option("local", settings["display_time_mode"], "Local time") + option("utc", settings["display_time_mode"], "UTC")
+    timezone_suggestions = "".join(f"<option value='{zone}'>" for zone in (
+        "UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Phoenix",
+        "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu"))
     theme_status = " · ".join(f'{e(hotspot["label"])}: {e(THEME_CACHES.get(hotspot["url"], {}).get("status", "Waiting for WPSD colors"))}' for hotspot in hotspots)
     return f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>{title}</title>{page_styles(settings)}</head>
 <body><main class='setup-shell'><header class='setup-header'><div>{BRAND}<h1>{title}</h1><p class='muted'>{intro}</p></div>{back}</header>{notice}
@@ -866,7 +920,11 @@ def setup_page(settings, edit=False, error="", saved=False):
 <hr class='section-rule'><h2>Preferences</h2><div class='setup-grid'>
 <label>Poll interval<select name='poll_seconds'>{poll_options}</select><span class='field-help'>Ten seconds is a good default.</span></label>
 <label>Rows per hotspot<select name='poll_limit'>{limit_options}</select></label>
-<label>Timestamp time zone<input required name='wpsd_timezone' value='{e(settings["wpsd_timezone"])}' placeholder='UTC'><span class='field-help'>Keep UTC for current WPSD. Older feeds may need America/Chicago or another IANA zone.</span></label>
+<label>Activity queue retention<select name='queue_retention_days'>{retention_options}</select><span class='field-help'>Unlogged heard activity expires automatically. Saved and uploaded contacts are kept in Saved.</span></label>
+<label>WPSD timestamp source zone<input required name='wpsd_timezone' value='{e(settings["wpsd_timezone"])}' placeholder='UTC'><span class='field-help'>Keep UTC for current WPSD. Change this only for an older feed that sends local timestamps without an offset.</span></label>
+<label>Local time zone<input required id='display-timezone' name='display_timezone' list='timezone-list' value='{e(settings["display_timezone"])}' data-detect='{"no" if edit else "yes"}' placeholder='America/Chicago'><span class='field-help'>Used for the Local clock. Your browser fills this during first setup; you can change it here.</span></label>
+<datalist id='timezone-list'>{timezone_suggestions}</datalist>
+<label>Default activity clock<select name='display_time_mode'>{clock_options}</select><span class='field-help'>The activity page also has a Local / UTC toggle.</span></label>
 <label>Theme<select name='theme_mode'>{theme_options}</select><span class='field-help'>A hotspot filter uses that hotspot's colors. All hotspots uses the first hotspot's colors.</span></label>
 <div class='wide field-help'>{theme_status}. WPSD color changes refresh within five minutes.</div>
 <label>Logger password<input {required} type='password' name='password' minlength='8' autocomplete='new-password'><span class='field-help'>{password_help}</span></label>
@@ -876,6 +934,11 @@ def setup_page(settings, edit=False, error="", saved=False):
 <script>
 const list = document.getElementById('hotspots');
 const add = document.getElementById('add-hotspot');
+const displayTimezone = document.getElementById('display-timezone');
+if (displayTimezone.dataset.detect === 'yes' && displayTimezone.value === 'UTC') {{
+  const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (browserTimezone) displayTimezone.value = browserTimezone;
+}}
 function updateButtons() {{
   const rows = list.querySelectorAll('.hotspot-row');
   rows.forEach(row => row.querySelector('[data-remove-hotspot]').disabled = rows.length === 1);
@@ -928,6 +991,7 @@ def review_page(settings, row):
     hotspot = contact_hotspot(row, settings)
     source = source_settings(settings, hotspot) if hotspot["url"] else settings
     token = form_token(settings)
+    local_time, local_date, local_zone = display_timestamp(row["heard_utc"], settings["display_timezone"], "local")
     mode_options = "".join(option(mode, row["mode"]) for mode in MODE_SPECS)
     propagation_options = "".join(option(code, default_propagation(row), label) for code, label in
                                   (("INTERNET", "Internet-assisted"), ("RPT", "Repeater / gateway"), ("LOS", "Direct RF / line of sight")))
@@ -945,7 +1009,7 @@ def review_page(settings, row):
     return header + f"""<p class='review-note'>{e(evidence)}. Timing is a clue; it cannot establish what was said.</p>{room_note}
 <form method='post' action='/log'><input type='hidden' name='csrf' value='{token}'><input type='hidden' name='id' value='{e(row["id"])}'><div class='grid'>
 <label>Callsign<input required name='call' value='{e(row["call"])}'></label>
-<label>UTC date / time<input required type='datetime-local' step='1' name='when' value='{e(row["heard_utc"][:19])}'></label>
+<label>UTC date / time<input required type='datetime-local' step='1' name='when' value='{e(row["heard_utc"][:19])}'><span class='field-help'>Local: {e(local_date)} {e(local_time)} {e(local_zone)} · {e(settings["display_timezone"])}</span></label>
 <label>Radio TX frequency · MHz<input required name='freq' inputmode='decimal' value='{e(hotspot["freq"])}'></label>
 <label>Band<input required name='band' value='{e(band_for(hotspot["freq"]))}' placeholder='70cm'></label>
 <label>Mode<select name='mode'>{mode_options}</select></label><label>Propagation<select name='prop_mode'>{propagation_options}</select></label>
@@ -962,9 +1026,14 @@ def dashboard_page(settings, query):
     selected_hotspot = next((hotspot for hotspot in hotspots if hotspot["id"] == selected), None)
     if not selected_hotspot:
         selected = ""
-    view = query.get("view", ["all"])[0]
-    if view not in ("all", "exchanges", "saved"):
-        view = "all"
+    view = query.get("view", ["exchanges"])[0]
+    if view == "all":
+        view = "queue"
+    if view not in ("exchanges", "queue", "saved"):
+        view = "exchanges"
+    clock = query.get("clock", [settings["display_time_mode"]])[0]
+    if clock not in ("local", "utc"):
+        clock = settings["display_time_mode"]
     mode = query.get("mode", [""])[0]
     if mode not in MODE_SPECS:
         mode = ""
@@ -983,7 +1052,9 @@ def dashboard_page(settings, query):
             SUM(CASE WHEN log_status='pending' THEN 1 ELSE 0 END),
             SUM(CASE WHEN logged_at IS NOT NULL AND COALESCE(log_status,'')!='pending' THEN 1 ELSE 0 END)
             FROM heard WHERE {base_where}""", params).fetchone()
-        extra = "" if view == "all" else (" AND (exchange_pattern!='' AND logged_at IS NULL OR log_status='pending')" if view == "exchanges" else " AND logged_at IS NOT NULL AND COALESCE(log_status,'')!='pending'")
+        extra = {"queue": " AND (logged_at IS NULL OR log_status='pending')",
+                 "exchanges": " AND (exchange_pattern!='' AND logged_at IS NULL OR log_status='pending')",
+                 "saved": " AND logged_at IS NOT NULL AND COALESCE(log_status,'')!='pending'"}[view]
         entries = cx.execute(f"SELECT * FROM heard WHERE {base_where}{extra} ORDER BY heard_utc DESC LIMIT ?", params + [ACTIVITY_LIMIT]).fetchall()
     source = source_settings(settings, selected_hotspot or hotspots[0])
     source_status = []
@@ -995,18 +1066,22 @@ def dashboard_page(settings, query):
         room = f' / {e(status["ysf_room"])}' if status.get("ysf_room") and not status.get("error") else ""
         source_status.append(f"<span class='{'error' if status.get('error') else ''}'><strong>{e(hotspot['label'])}</strong> · {e(state)}{room}</span>")
     tabs = []
-    for code, label in (("all", "All activity"), ("exchanges", "Possible exchanges"), ("saved", "Saved")):
-        url = "/?" + urllib.parse.urlencode({"view": code, "hotspot": selected, "mode": mode})
+    for code, label in (("exchanges", "Possible exchanges"), ("queue", "Activity queue"), ("saved", "Saved")):
+        url = "/?" + urllib.parse.urlencode({"view": code, "hotspot": selected, "mode": mode, "clock": clock})
         tabs.append(f"<a class='{'active' if view == code else ''}' href='{e(url)}'>{label}</a>")
+    clocks = []
+    for code, label in (("local", "Local"), ("utc", "UTC")):
+        url = "/?" + urllib.parse.urlencode({"view": view, "hotspot": selected, "mode": mode, "clock": code})
+        clocks.append(f"<a class='{'active' if clock == code else ''}' href='{e(url)}'>{label}</a>")
     hotspot_options = option("", selected, "All hotspots") + "".join(option(item["id"], selected, item["label"]) for item in hotspots)
     mode_options = option("", mode, "All modes") + "".join(option(item, mode) for item in MODE_SPECS)
     summary = "".join(f"<span><strong>{count or 0}</strong>{label}</span>" for count, label in zip(counts, ("in queue", "possible exchanges", "need QRZ check", "saved")))
     page = [f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Hotspot Logger</title>{page_styles(source)}</head>
 <body><main class='shell'><header class='site-header'><div><h1>{BRAND}</h1><span class='brand-kicker'>{e(settings["station_callsign"])} / Contact review</span></div>
-<nav class='header-actions' aria-label='Page actions'><a class='linkbtn secondary' href='/settings'>Settings</a><a class='linkbtn secondary' href='{e("/?" + urllib.parse.urlencode({"view": view, "hotspot": selected, "mode": mode}))}'>Refresh</a><a class='linkbtn secondary' href='/export.adi'>ADIF export</a><a class='linkbtn danger' href='{e("/clear?" + urllib.parse.urlencode({"hotspot": selected}))}'>Clear queue</a></nav></header>
+<nav class='header-actions' aria-label='Page actions'><a class='linkbtn secondary' href='/settings'>Settings</a><a class='linkbtn secondary' href='{e("/?" + urllib.parse.urlencode({"view": view, "hotspot": selected, "mode": mode, "clock": clock}))}'>Refresh</a><a class='linkbtn secondary' href='/export.adi'>ADIF export</a><a class='linkbtn danger' href='{e("/clear?" + urllib.parse.urlencode({"hotspot": selected}))}'>Clear queue</a></nav></header>
 <div class='source-strip'>{"".join(source_status)}</div><div class='summary-line'>{summary}</div>
-<div class='toolbar'><nav class='tabs' aria-label='Activity views'>{"".join(tabs)}</nav><form method='get' action='/' class='filters'><input type='hidden' name='view' value='{view}'><select name='hotspot' aria-label='Hotspot'>{hotspot_options}</select><select name='mode' aria-label='Mode'>{mode_options}</select><button class='secondary'>Apply</button></form></div>
-<div class='table-wrap'><table><thead><tr><th>UTC time</th><th>Station</th><th>Hotspot</th><th>Mode</th><th>Destination</th><th>Status</th><th>Actions</th></tr></thead><tbody>"""]
+<div class='toolbar'><nav class='tabs' aria-label='Activity views'>{"".join(tabs)}</nav><div class='toolbar-controls'><nav class='clock-toggle' aria-label='Displayed time'>{"".join(clocks)}</nav><form method='get' action='/' class='filters'><input type='hidden' name='view' value='{view}'><input type='hidden' name='clock' value='{clock}'><select name='hotspot' aria-label='Hotspot'>{hotspot_options}</select><select name='mode' aria-label='Mode'>{mode_options}</select><button class='secondary'>Apply</button></form></div></div>
+<div class='table-wrap'><table><thead><tr><th>{'Local time' if clock == 'local' else 'UTC time'}</th><th>Station</th><th>Hotspot</th><th>Mode</th><th>Destination</th><th>Status</th><th>Actions</th></tr></thead><tbody>"""]
     for row in entries:
         hotspot = contact_hotspot(row, settings)
         if row["log_status"] == "pending":
@@ -1019,18 +1094,19 @@ def dashboard_page(settings, query):
             label, state = "Heard only", ""
         evidence = f"<span class='small'>{e(row['exchange_pattern'])}</span>" if row["exchange_pattern"] and not row["logged_at"] else ""
         target_detail = f"<span class='small'>{e(row['target'])}</span>" if row["ysf_room"] else ""
-        stamp = row["heard_utc"]
-        page.append(f"""<tr><td data-label='UTC time'><div>{e(stamp[11:19])}<span class='small'>{e(stamp[:10])}</span></div></td>
+        shown_time, shown_date, shown_zone = display_timestamp(row["heard_utc"], settings["display_timezone"], clock)
+        time_label = "Local time" if clock == "local" else "UTC time"
+        page.append(f"""<tr><td data-label='{time_label}'><div>{e(shown_time)}<span class='small'>{e(shown_date)} · {e(shown_zone)}</span></div></td>
 <td data-label='Station'><div><span class='call'>{e(row["call"])}</span><span class='small'>{e(row["direction"])} · {e(row["duration"])} s</span></div></td>
 <td data-label='Hotspot'>{e(hotspot["label"])}</td><td data-label='Mode'><span class='mode'>{e(row["mode"])}</span></td>
 <td data-label='Destination'><div>{e(row["ysf_room"] or row["target"] or "—")}{target_detail}</div></td>
 <td data-label='Status'><div><span class='state {state}'>{label}</span>{evidence}</div></td>
 <td data-label='Actions'><div class='row-actions'><a href='/review?id={e(row["id"])}'>{'Open' if row["logged_at"] and row["log_status"] != "pending" else 'Review'}</a><a class='delete' href='/delete?id={e(row["id"])}'>Delete</a></div></td></tr>""")
     if not entries:
-        message = "No possible exchanges detected. All activity includes heard stations you can review manually." if view == "exchanges" else ("No saved contacts in this view." if view == "saved" else "No voice activity in this view yet.")
+        message = "No possible exchanges detected. Activity queue includes heard stations you can review manually." if view == "exchanges" else ("No saved contacts in this view." if view == "saved" else "No queued activity in this view.")
         page.append(f"<tr><td colspan='7' class='empty'>{message}</td></tr>")
     page.append(f"""</tbody></table></div><p class='context'>A/B/A and B/A/B timing can suggest an exchange involving your RF callsign. It is not a confirmed QSO. Only you decide what to log.</p>
-{page_footer(f'Latest {ACTIVITY_LIMIT} entries in this view · All times UTC')}</main></body></html>""")
+{page_footer(f'Latest {ACTIVITY_LIMIT} entries in this view · Times {settings["display_timezone"] if clock == "local" else "UTC"}')}</main></body></html>""")
     return "".join(page)
 
 def removal_page(settings, row=None, count=0, hotspot=None):

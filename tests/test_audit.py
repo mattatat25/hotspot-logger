@@ -144,6 +144,7 @@ class AuditTests(unittest.TestCase):
             self.assertIn('Hotspot Logger', page)
             self.assertIn("class='beta'>Beta", page)
             self.assertIn('KF0WSS', page)
+            self.assertIn("href='https://www.qrz.com/db/KF0WSS'", page)
             self.assertIn("img-src 'self'", response.headers['Content-Security-Policy'])
         with self.request(host, '/assets/hotspot-logger.png') as response:
             self.assertEqual(response.headers['Content-Type'], 'image/png')

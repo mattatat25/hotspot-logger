@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0-beta.5
+
+- Reduce one continuous A/B/A or B/A/B conversation to one possible contact while leaving its other transmissions in Activity queue.
+- Open Possible exchanges by default and keep saved or uploaded contacts out of Activity queue.
+- Add a Local / UTC activity clock, a local time-zone setting, and a local-time reference on contact review.
+- Add a configurable 1–30 day retention period for unlogged activity; saved contacts are retained separately.
+- Link the KF0WSS creator credit to its QRZ callsign page.
+
 ## 0.8.0-beta.4
 
 - Update existing installations from the public `main` branch even when the local branch has an older name.

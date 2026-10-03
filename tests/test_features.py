@@ -41,7 +41,7 @@ class FeatureTests(unittest.TestCase):
         old_db = app.DB_PATH
         app.DB_PATH = os.path.join(self.folder.name, "logger.sqlite")
         self.addCleanup(setattr, app, "DB_PATH", old_db)
-        for target in (app.SOURCE_STATUS, app.THEME_CACHES, app.STATUS):
+        for target in (app.SOURCE_STATUS, app.THEME_CACHES, app.STATUS, app.EXCHANGE_REBUILDS):
             mock = patch.dict(target, {}, clear=True)
             mock.start()
             self.addCleanup(mock.stop)
@@ -53,6 +53,7 @@ class FeatureTests(unittest.TestCase):
         self.settings = app.save_configuration({
             "station_callsign": "N0CALL", "wpsd_url": "http://ysf.test/api/", "rf_freq_mhz": "441.425",
             "password": "testpass", "password_confirm": "testpass", "qrz_api_key": "TEST-KEY",
+            "display_timezone": "America/Chicago", "display_time_mode": "local",
         }, initial=True)
 
     def sources(self):
@@ -204,7 +205,10 @@ class FeatureTests(unittest.TestCase):
         valid = [row("N0CALL", 0), row("W0WC", 1), row("N0CALL", 2)]
         self.assertEqual(app.possible_exchanges(valid, "N0CALL")["1"], "N0CALL → W0WC → N0CALL")
         reverse = [row("W0WC", 0), row("N0CALL", 1), row("W0WC", 2)]
-        self.assertEqual(set(app.possible_exchanges(reverse, "N0CALL")), {"0", "2"})
+        self.assertEqual(set(app.possible_exchanges(reverse, "N0CALL")), {"0"})
+        conversation = [row("W0WC", 0), row("W0WC", 1), row("N0CALL", 2),
+                        row("W0WC", 3), row("N0CALL", 4), row("W0WC", 5), row("N0CALL", 6)]
+        self.assertEqual(set(app.possible_exchanges(conversation, "N0CALL")), {"0"})
         rejected = [
             [row("W0WC", 0), row("W1ABC", 1), row("W0WC", 2)],
             [row("N0CALL", 0, direction="Net"), row("W0WC", 1), row("N0CALL", 2)],
@@ -259,6 +263,24 @@ class FeatureTests(unittest.TestCase):
         with app.db() as cx:
             contact = cx.execute("SELECT * FROM heard WHERE hotspot_id=? AND call='W0WC'", (source["id"],)).fetchone()
         self.assertEqual(contact["exchange_pattern"], "N0CALL → W0WC → N0CALL")
+        page, _ = self.request(self.server(), "/")
+        self.assertIn("class='active' href='/?view=exchanges", page)
+        self.assertIn("W0WC", page)
+
+    def test_queue_retention_keeps_saved_contacts(self):
+        source = app.configured_hotspots(self.settings)[0]
+        old = (dt.datetime.now(app.UTC) - dt.timedelta(days=8)).isoformat()
+        rows = [app.parse_row(self.transmission(call, seconds=60 + index))
+                for index, call in enumerate(("W1ABC", "W2ABC"))]
+        with app.db() as cx:
+            cx.executemany("INSERT INTO heard (id,call,mode,target,direction,heard_utc,duration,raw,first_seen) VALUES (?,?,?,?,?,?,?,?,?)", rows)
+            cx.execute("UPDATE heard SET first_seen=?", (old,))
+            cx.execute("UPDATE heard SET logged_at=?,log_status='save',log_adif='<CALL:5>W2ABC<EOR>' WHERE id=?",
+                       (old, rows[1][0]))
+        self.poll(source, [self.transmission("W3ABC", seconds=5)])
+        with app.db() as cx:
+            self.assertIsNone(cx.execute("SELECT id FROM heard WHERE id=?", (rows[0][0],)).fetchone())
+            self.assertIsNotNone(cx.execute("SELECT id FROM heard WHERE id=?", (rows[1][0],)).fetchone())
 
     def test_gui_filters_review_frequency_protocol_and_scoped_clear(self):
         first, second = self.sources()
@@ -268,14 +290,20 @@ class FeatureTests(unittest.TestCase):
         with app.db() as cx:
             ysfr = cx.execute("SELECT * FROM heard WHERE hotspot_id=?", (first["id"],)).fetchone()
             nx = cx.execute("SELECT * FROM heard WHERE hotspot_id=?", (second["id"],)).fetchone()
-        page, _ = self.request(host, "/?hotspot=" + second["id"])
+        page, _ = self.request(host, "/?view=queue&hotspot=" + second["id"])
         self.assertIn("K9XYZ", page)
         self.assertNotIn("W0WC", page)
+        self.assertIn("<th>Local time</th>", page)
+        self.assertIn("Times America/Chicago", page)
+        utc_page, _ = self.request(host, "/?view=queue&clock=utc&hotspot=" + second["id"])
+        self.assertIn("<th>UTC time</th>", utc_page)
         review, _ = self.request(host, "/review?id=" + nx["id"])
         self.assertIn("439.550", review)
         self.assertNotIn("441.425", review)
         self.assertIn("NXDN 65000", review)
         self.assertIn("Heard only", review)
+        self.assertIn("Local:", review)
+        self.assertIn("America/Chicago", review)
         settings_page, headers = self.request(host, "/settings")
         self.assertIn("Add hotspot", settings_page)
         self.assertIn("YSF desk", settings_page)
@@ -401,6 +429,8 @@ class FeatureTests(unittest.TestCase):
         page, _ = self.request(host, "/?view=saved&mode=P25")
         self.assertIn("K9XYZ", page)
         self.assertNotIn("W1ABC", page)
+        queue, _ = self.request(host, "/?view=queue")
+        self.assertNotIn("K9XYZ", queue)
         export, _ = self.request(host, "/export.adi")
         self.assertIn("<CALL:5>K9XYZ", export)
         self.assertIn("P25 | A radio contact", export)

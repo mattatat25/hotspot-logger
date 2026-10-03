@@ -31,18 +31,22 @@ This is the logbook key, not your QRZ password or XML callsign-lookup credential
 
 A blank key field keeps an existing key. Check **Remove the saved QRZ key** to delete it. Password fields work the same way: leave both blank to keep the password, or enter and repeat a new one of at least eight characters.
 
-### Theme and polling
+### Time, theme, and polling
 
 **Match WPSD** uses the hotspot's public theme colors. A selected hotspot controls the page's colors; **All hotspots** uses the first source. Color changes are checked every five minutes. Refresh the page to see them.
 
 Start with a **10-second** poll interval and **40 rows** per hotspot. A busy room may need more rows to avoid missing bursts. Polls run sequentially, so the complete cycle can take longer when sources are slow or offline.
 
-Keep **Timestamp time zone → UTC** for current WPSD. Only change it when an older feed supplies local timestamps without an offset.
+Keep **WPSD timestamp source zone → UTC** for current WPSD. Only change it when an older feed supplies local timestamps without an offset.
+
+Set **Local time zone** to your IANA zone, such as `America/Chicago`, and choose the default activity clock. The **Local / UTC** toggle on the activity page changes the displayed clock without changing the UTC time sent to QRZ or written to ADIF.
+
+**Activity queue retention** controls when unlogged heard activity expires. The default is seven days. Saved and uploaded contacts are retained in **Saved** and remain available to ADIF export.
 
 ## Review and save a contact
 
 1. Make a two-way contact on your radio.
-2. In **All activity**, select the hotspot or mode if needed.
+2. Start in **Possible exchanges**. If the contact was not detected there, open **Activity queue** and select the hotspot or mode if needed.
 3. Find the station and select **Review**.
 4. Check the fields below.
 5. Select **Log to QRZ** or **Save to ADIF**.
@@ -85,7 +89,7 @@ The app uses valid [ADIF 3.1.7 values](https://www.adif.org/317/ADIF_317.htm). I
 | Uploaded to QRZ | QRZ returned a complete successful insert response, or you manually confirmed it after checking. |
 | Check QRZ result | The result is uncertain. Check QRZ before reopening the entry. |
 
-Possible exchanges need matching hotspot, mode, target/room, and a reported timeslot when available, within five minutes. Known bursts under two seconds and network echoes of your callsign do not qualify. When WPSD omits duration or a YSF room, the logger can still suggest a match from the remaining channel evidence. Polling gaps, nets, busy rooms, or missing callsigns can still produce false positives or missed exchanges. Confirm the QSO yourself.
+Possible exchanges need matching hotspot, mode, target/room, and a reported timeslot when available, within five minutes. One continuous conversation produces one review candidate; its other transmissions remain in **Activity queue**. Known bursts under two seconds and network echoes of your callsign do not qualify. When WPSD omits duration or a YSF room, the logger can still suggest a match from the remaining channel evidence. Polling gaps, nets, busy rooms, or missing callsigns can still produce false positives or missed exchanges. Confirm the QSO yourself.
 
 An upload is not a QSL confirmation. QRZ confirmation requires matching independent logs from both operators. QRZ's award rules also treat Internet/repeater contacts separately; see [confirmations](https://www.qrz.com/docs/logbook30/confirmations-how) and [award rules](https://www.qrz.com/page/qrz-operating-awards).
 

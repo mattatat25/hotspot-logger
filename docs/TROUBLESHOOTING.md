@@ -62,7 +62,7 @@ A failed source does not stop the other hotspots. The page shows the failing sou
 
 ## WPSD connects but no callers appear
 
-- Clear the hotspot and mode filters, then select **All activity**.
+- Clear the hotspot and mode filters, then select **Activity queue**.
 - Check that WPSD reports a supported voice mode and a resolved callsign.
 - Your own callsign is excluded from the contact queue.
 - The feed needs a complete date and time; a time of day alone is insufficient.
@@ -73,7 +73,7 @@ If the page reports unrecognized rows, compare a redacted sample with [WPSD comp
 
 A/B/A detection needs your callsign on RF, the other callsign, and matching channel information. Known durations under two seconds are ignored; a missing duration does not discard an otherwise usable WPSD row. YSF uses the observed room when available and falls back to DG-ID on that hotspot when it is not. Your current poll limit may miss bursts in a busy room.
 
-Use **All activity** and review contacts manually when evidence is incomplete. The detector never proves that someone spoke to you.
+Use **Activity queue** and review contacts manually when evidence is incomplete. The detector never proves that someone spoke to you.
 
 ## The YSF destination only says DG-ID
 
@@ -89,7 +89,7 @@ The logger supports ADIF 10m, 6m, 2m, 70cm, 33cm, and 23cm frequency ranges. Bot
 
 ## The timestamp is wrong
 
-The logger displays and uploads UTC. Current WPSD supplies `time_utc`; keep **Timestamp time zone → UTC**.
+The logger always uploads UTC. Use the activity page's **Local / UTC** toggle for display, and keep **WPSD timestamp source zone → UTC** for current WPSD.
 
 Only change it for an older/custom feed with local times and no offset. Use an IANA zone such as `America/Chicago`, then compare a fresh entry with WPSD.
 

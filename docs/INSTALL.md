@@ -83,7 +83,10 @@ Keep the folder name unchanged after installation. It determines which Docker da
 | Radio TX frequency | MHz, such as `441.425` | WPSD **Admin → Configuration → Radio Frequency RX**. |
 | Station callsign | Your radio and logbook callsign | Use the same callsign as the QRZ logbook you plan to use. |
 | QRZ Logbook API key | Optional key for that logbook | QRZ **My Logbook → Settings → API**; [QRZ instructions](https://www.qrz.com/docs/logbook30/api). |
-| Timestamp time zone | `UTC` | Only change it for an older feed that reports local time without an offset. |
+| WPSD timestamp source zone | `UTC` | Only change it for an older feed that reports local time without an offset. |
+| Local time zone | Browser-detected | Used by the Local activity clock and the local reference on contact review. |
+| Default activity clock | Local time | The activity page can switch between Local and UTC at any time. |
+| Activity queue retention | 7 days | Removes old unlogged activity; saved and uploaded contacts remain in Saved. |
 | Logger password | At least eight characters, entered twice | Choose a password for this logger. |
 
 Leave the poll interval at **10 seconds**, rows at **40**, and theme at **Match WPSD** to start. Select **Add hotspot** for additional sources, then **Start logger**.
