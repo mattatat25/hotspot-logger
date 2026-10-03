@@ -25,6 +25,15 @@ ROOM_PAGE = """<div class='divTable'><div class='divTableHead'>DMR Status</div>
 <div class='divTableHeadCell'>Link</div><div class='divTableCell'><a>US-LZARC</a></div></div>
 <div class='divTableHead'>P25 Status</div><div class='divTableCell'>9999</div>"""
 
+CURRENT_ROOM_PAGE = """<div id='repeaterInfo'>
+<div class='sidebar-section-title'>DMR Status</div>
+<div class='sidebar-status-grid'><div class='status-pill active'><span>Link</span><div class='pill-data'><span class='pill-value'>Wrong room</span></div></div></div>
+<div class='sidebar-section-title'>YSF Status [In Room]</div>
+<div class='sidebar-status-grid'>
+<div class='status-pill active' style='grid-column: span 2'><span>Public</span><div class='pill-data'><span class='pill-value'>On</span></div></div>
+<div class='status-pill active' style='grid-column: span 2'><span>Link</span><div class='pill-data'><span class='pill-value'>US-KCWide</span><i class='fa fa-link'></i></div></div>
+</div><br><div class='sidebar-section-title'>APRS Gateway</div></div>"""
+
 
 class Response:
     def __init__(self, body):
@@ -156,6 +165,7 @@ class FeatureTests(unittest.TestCase):
 
     def test_room_panels_and_historical_room_honesty(self):
         self.assertEqual(app.parse_ysf_room(ROOM_PAGE), "US-LZARC")
+        self.assertEqual(app.parse_ysf_room(CURRENT_ROOM_PAGE), "US-KCWide")
         legacy = "<div class='divTableHead'>YSF Net [Linked]</div><div class='divTableCell'><div title='In Room: America Link'>America Li...<br>(YSF21080)</div></div>"
         self.assertEqual(app.parse_ysf_room(legacy), "America Link")
         self.assertEqual(app.parse_ysf_room(ROOM_PAGE.replace("US-LZARC", "Not Linked")), "")
@@ -166,6 +176,16 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(app.observed_ysf_room(old, app.parse_row(old), self.settings, "US-LZARC"), "")
         old["room"] = "Yesterday room"
         self.assertEqual(app.observed_ysf_room(old, app.parse_row(old), self.settings, "US-LZARC"), "Yesterday room")
+
+    def test_current_wpsd_room_reaches_review_comment(self):
+        source = app.configured_hotspots(self.settings)[0]
+        self.poll(source, [self.transmission("W0WC", seconds=5)], CURRENT_ROOM_PAGE)
+        with app.db() as cx:
+            contact = cx.execute("SELECT * FROM heard WHERE call='W0WC'").fetchone()
+        self.assertEqual(contact["ysf_room"], "US-KCWide")
+        self.assertEqual(app.contact_comment(contact, self.settings),
+                         "YSF room US-KCWide | DG-ID 0 via WPSD")
+        self.assertEqual(app.SOURCE_STATUS[source["id"]]["ysf_room"], "US-KCWide")
 
     def test_exchange_evidence_survives_polls_and_is_scoped_to_hotspot(self):
         first, second = self.sources()

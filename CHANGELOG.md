@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0-beta.7
+
+- Read YSF room names from the current WPSD sidebar layout while retaining support for older dashboard markup.
+
 ## 0.8.0-beta.6
 
 - Replace the local-time-zone text field with a selectable list on first setup and in Settings.

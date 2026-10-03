@@ -20,7 +20,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
-VERSION = "0.8.0-beta.6"
+VERSION = "0.8.0-beta.7"
 ACTIVITY_LIMIT = 50
 MAX_UNLOGGED_PER_HOTSPOT = 2500
 MAX_ACTIVITY_PER_HOTSPOT = 5000
@@ -421,8 +421,11 @@ class DashboardCells(HTMLParser):
             if attrs.get("title"):
                 self.capture[2].append(attrs["title"])
             return
-        if tag in ("td", "th") or any(c in classes for c in ("divTableHead", "divTableHeadCell", "divTableCell")):
-            kind = "head" if "divTableHead" in classes else "cell"
+        legacy_cell = any(c in classes for c in ("divTableHead", "divTableHeadCell", "divTableCell"))
+        current_head = "sidebar-section-title" in classes
+        current_cell = "status-pill" in classes
+        if tag in ("td", "th") or legacy_cell or current_head or current_cell:
+            kind = "head" if "divTableHead" in classes or current_head else "cell"
             self.capture = [kind, [], [attrs.get("title", "")], self.depth]
 
     def handle_endtag(self, tag):
@@ -461,6 +464,9 @@ def parse_ysf_room(page):
     for index, (text, title) in enumerate(section):
         if re.fullmatch(r"Link(?:ed to)?|Room|Reflector", text, re.I) and index + 1 < len(section):
             return clean_room(section[index + 1][0])
+        combined = re.fullmatch(r"(?:Linked\s*to|Link|Room|Reflector)\s*:?\s*(.+)", text, re.I)
+        if combined:
+            return clean_room(combined.group(1))
     for text, title in section:
         linked = re.search(r"(?:In Room:|Linked to:?)[ ]*(.+)", title, re.I)
         if linked:
