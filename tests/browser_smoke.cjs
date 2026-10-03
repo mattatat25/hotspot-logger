@@ -18,6 +18,9 @@ async function fits(page) {
   const page = await context.newPage();
   await page.goto(base);
   await page.locator('.brand-logo').evaluate(img => img.decode());
+  assert.equal(await page.locator('#display-timezone').evaluate(field => field.tagName), 'SELECT');
+  assert.equal(await page.locator('#display-timezone option[value="America/Chicago"]').count(), 1);
+  assert.equal(await page.locator('[name=queue_retention_days]').inputValue(), '1');
   await page.screenshot({ path: `${output}/setup-desktop.png`, fullPage: true });
   await page.getByRole('button', { name: 'Add hotspot', exact: true }).click();
   assert.equal(await page.locator('.hotspot-row').count(), 2);
@@ -60,6 +63,7 @@ async function fits(page) {
         assert(await page.getByRole('button', { name: 'Log to QRZ', exact: true }).isDisabled());
         await page.goto(base + '/settings');
         await fits(page);
+        assert.equal(await page.locator('#display-timezone').evaluate(field => field.tagName), 'SELECT');
         await page.getByRole('button', { name: 'Add hotspot', exact: true }).click();
         assert.equal(await page.locator('.hotspot-row').count(), 2);
         await page.screenshot({ path: `${output}/${engine}-${device}-${colorScheme}-settings.png`, fullPage: true });

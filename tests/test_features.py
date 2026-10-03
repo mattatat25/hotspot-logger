@@ -269,7 +269,8 @@ class FeatureTests(unittest.TestCase):
 
     def test_queue_retention_keeps_saved_contacts(self):
         source = app.configured_hotspots(self.settings)[0]
-        old = (dt.datetime.now(app.UTC) - dt.timedelta(days=8)).isoformat()
+        self.assertEqual(self.settings["queue_retention_days"], "1")
+        old = (dt.datetime.now(app.UTC) - dt.timedelta(days=2)).isoformat()
         rows = [app.parse_row(self.transmission(call, seconds=60 + index))
                 for index, call in enumerate(("W1ABC", "W2ABC"))]
         with app.db() as cx:
@@ -277,10 +278,32 @@ class FeatureTests(unittest.TestCase):
             cx.execute("UPDATE heard SET first_seen=?", (old,))
             cx.execute("UPDATE heard SET logged_at=?,log_status='save',log_adif='<CALL:5>W2ABC<EOR>' WHERE id=?",
                        (old, rows[1][0]))
+            cx.execute("INSERT INTO activity VALUES(?,?,?,?,?,?,?,?)",
+                       ("old-activity", source["id"], source["url"], "W1ABC", "YSF", "Net", old, "8"))
         self.poll(source, [self.transmission("W3ABC", seconds=5)])
         with app.db() as cx:
             self.assertIsNone(cx.execute("SELECT id FROM heard WHERE id=?", (rows[0][0],)).fetchone())
             self.assertIsNotNone(cx.execute("SELECT id FROM heard WHERE id=?", (rows[1][0],)).fetchone())
+            self.assertIsNone(cx.execute("SELECT id FROM activity WHERE id='old-activity'").fetchone())
+
+    def test_busy_hotspot_storage_is_capped(self):
+        source = app.configured_hotspots(self.settings)[0]
+        now = dt.datetime.now(app.UTC).isoformat()
+        with app.db() as cx:
+            cx.executemany("""INSERT INTO heard
+                (id,call,mode,target,direction,heard_utc,duration,raw,first_seen,hotspot_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                ((f"heard-{index:05d}", "W1ABC", "YSF", "DG-ID 0", "Net", now, "8", "{}", now, source["id"])
+                 for index in range(app.MAX_UNLOGGED_PER_HOTSPOT + 2)))
+            cx.executemany("INSERT INTO activity VALUES(?,?,?,?,?,?,?,?)",
+                ((f"activity-{index:05d}", source["id"], source["url"], "W1ABC", "YSF", "Net", now, "8")
+                 for index in range(app.MAX_ACTIVITY_PER_HOTSPOT + 2)))
+        self.poll(source, [self.transmission("W3ABC", seconds=5)])
+        with app.db() as cx:
+            heard_count = cx.execute("SELECT COUNT(*) FROM heard WHERE hotspot_id=? AND logged_at IS NULL", (source["id"],)).fetchone()[0]
+            activity_count = cx.execute("SELECT COUNT(*) FROM activity WHERE hotspot_id=?", (source["id"],)).fetchone()[0]
+        self.assertLessEqual(heard_count, app.MAX_UNLOGGED_PER_HOTSPOT)
+        self.assertLessEqual(activity_count, app.MAX_ACTIVITY_PER_HOTSPOT)
 
     def test_gui_filters_review_frequency_protocol_and_scoped_clear(self):
         first, second = self.sources()

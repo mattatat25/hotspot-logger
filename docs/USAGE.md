@@ -39,9 +39,9 @@ Start with a **10-second** poll interval and **40 rows** per hotspot. A busy roo
 
 Keep **WPSD timestamp source zone → UTC** for current WPSD. Only change it when an older feed supplies local timestamps without an offset.
 
-Set **Local time zone** to your IANA zone, such as `America/Chicago`, and choose the default activity clock. The **Local / UTC** toggle on the activity page changes the displayed clock without changing the UTC time sent to QRZ or written to ADIF.
+Select **Local time zone**, such as `America/Chicago`, and choose the default activity clock. The browser selects its detected zone during first setup. The **Local / UTC** toggle on the activity page changes the displayed clock without changing the UTC time sent to QRZ or written to ADIF.
 
-**Activity queue retention** controls when unlogged heard activity expires. The default is seven days. Saved and uploaded contacts are retained in **Saved** and remain available to ADIF export.
+**Activity queue retention** controls when unlogged heard activity expires. The default is one day. Per-hotspot storage caps provide another bound for unusually busy feeds. Saved and uploaded contacts are retained in **Saved** and remain available to ADIF export.
 
 ## Review and save a contact
 

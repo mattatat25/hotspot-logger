@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0-beta.6
+
+- Replace the local-time-zone text field with a selectable list on first setup and in Settings.
+- Default new installations to one day of unlogged activity and cap retained rows per hotspot for predictable storage use.
+
 ## 0.8.0-beta.5
 
 - Reduce one continuous A/B/A or B/A/B conversation to one possible contact while leaving its other transmissions in Activity queue.

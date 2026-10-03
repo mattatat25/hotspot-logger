@@ -82,6 +82,10 @@ class LoggerTests(unittest.TestCase):
                     self.assertIn("My Logbook → Settings → API", page)
                     self.assertIn("manual.wpsd.radio/advanced/api", page)
                     self.assertIn("Local time zone", page)
+                    self.assertIn("<select required id='display-timezone'", page)
+                    self.assertIn("value='America/Chicago'", page)
+                    self.assertNotIn("timezone-list", page)
+                    self.assertEqual(app.DEFAULTS["queue_retention_days"], "1")
                     token = re.search(r"name='csrf' value='([^']+)'", page).group(1)
                     form = {
                         "csrf": token, "station_callsign": "N0CALL",
@@ -119,6 +123,8 @@ class LoggerTests(unittest.TestCase):
                     with urllib.request.urlopen(settings_request) as response:
                         settings_page = response.read().decode()
                     self.assertIn("Update the logger here", settings_page)
+                    self.assertIn("<select required id='display-timezone'", settings_page)
+                    self.assertIn("value='America/Chicago' selected", settings_page)
                     settings_token = re.search(r"name='csrf' value='([^']+)'", settings_page).group(1)
                     update = {
                         "csrf": settings_token, "station_callsign": "N0CALL",

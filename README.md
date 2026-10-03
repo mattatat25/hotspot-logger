@@ -8,7 +8,7 @@ Hotspot Logger keeps a queue of stations heard by your hotspots. After a QSO, op
 
 Run it on an **Ubuntu VM, a Linux computer, or a Raspberry Pi with a 64-bit OS**, then use it from your desktop or phone. All logger settings are entered in the browser.
 
-**Public beta · 0.8.0-beta.5** — Created by **[KF0WSS](https://www.qrz.com/db/KF0WSS)**.
+**Public beta · 0.8.0-beta.6** — Created by **[KF0WSS](https://www.qrz.com/db/KF0WSS)**.
 
 ## Install
 
