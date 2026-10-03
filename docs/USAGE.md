@@ -93,11 +93,11 @@ Possible exchanges need matching hotspot, mode, target/room, and a reported time
 
 An upload is not a QSL confirmation. QRZ confirmation requires matching independent logs from both operators. QRZ's award rules also treat Internet/repeater contacts separately; see [confirmations](https://www.qrz.com/docs/logbook30/confirmations-how) and [award rules](https://www.qrz.com/page/qrz-operating-awards).
 
-## YSF rooms and DG-ID
+## YSF rooms
 
-YSF's **DG-ID** is separate from its linked room. For fresh activity, the logger prefers an API room or reads **YSF Status → Link** from the public dashboard.
+For fresh activity, the logger prefers an API room or reads **YSF Status → Link** from the public dashboard. WPSD's raw DG-ID remains available internally for matching transmissions when no room can be established, but it is not shown as the contact destination.
 
-A comment can read `YSF room US-LZARC | DG-ID 0 via WPSD`. The captured room stays with the entry when the hotspot changes rooms later.
+A comment can read `YSF room US-LZARC via WPSD`. The captured room stays with the entry when the hotspot changes rooms later.
 
 Historical Last Heard rows cannot be assigned a room from today's link. Their review page marks the room as unknown. A **current room (verify)** suggestion needs checking or replacing before saving.
 

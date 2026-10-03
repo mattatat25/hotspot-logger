@@ -75,9 +75,9 @@ A/B/A detection needs your callsign on RF, the other callsign, and matching chan
 
 Use **Activity queue** and review contacts manually when evidence is incomplete. The detector never proves that someone spoke to you.
 
-## The YSF destination only says DG-ID
+## The YSF room is missing
 
-DG-ID and room name are different values. Room capture needs a fresh transmission and the public YSF status panel, or a room supplied by the API. Historical entries retain an unknown room.
+Room capture needs a fresh transmission and the public YSF status panel, or a room supplied by the API. Historical entries retain an unknown room instead of displaying WPSD's raw DG-ID as the destination.
 
 The review comment may suggest the **current room (verify)**. Replace it with the room you used; do not assume the current link was active for an old contact.
 

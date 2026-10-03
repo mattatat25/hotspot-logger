@@ -184,7 +184,16 @@ class FeatureTests(unittest.TestCase):
             contact = cx.execute("SELECT * FROM heard WHERE call='W0WC'").fetchone()
         self.assertEqual(contact["ysf_room"], "US-KCWide")
         self.assertEqual(app.contact_comment(contact, self.settings),
-                         "YSF room US-KCWide | DG-ID 0 via WPSD")
+                         "YSF room US-KCWide via WPSD")
+        self.assertEqual(app.visible_target("YSF", "DG-ID 0"), "")
+        self.assertEqual(app.visible_target("YSF", "DG ID: 12"), "")
+        self.assertEqual(app.visible_target("DMR", "TG 91"), "TG 91")
+        dashboard = app.dashboard_page(self.settings, {"view": ["queue"]})
+        review = app.review_page(self.settings, contact)
+        self.assertIn("US-KCWide", dashboard)
+        self.assertIn("YSF room US-KCWide via WPSD", review)
+        self.assertNotIn("DG-ID 0", dashboard)
+        self.assertNotIn("DG-ID 0", review)
         self.assertEqual(app.SOURCE_STATUS[source["id"]]["ysf_room"], "US-KCWide")
 
     def test_exchange_evidence_survives_polls_and_is_scoped_to_hotspot(self):

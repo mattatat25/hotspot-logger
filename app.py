@@ -20,7 +20,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
-VERSION = "0.8.0-beta.7"
+VERSION = "0.8.0-beta.8"
 ACTIVITY_LIMIT = 50
 MAX_UNLOGGED_PER_HOTSPOT = 2500
 MAX_ACTIVITY_PER_HOTSPOT = 5000
@@ -1018,10 +1018,18 @@ def contact_hotspot(row, settings):
                 {"id": row["hotspot_id"], "label": row["hotspot_label"], "url": "", "freq": ""})
 
 
+def visible_target(mode, target):
+    target = str(target or "").strip()
+    if mode == "YSF" and re.fullmatch(r"DG\s*[- ]?\s*ID\s*[-:]?\s*\d+", target, re.I):
+        return ""
+    return target
+
+
 def contact_comment(row, settings):
-    description = f'{row["mode"]} {row["target"]} via WPSD'.strip()
+    target = visible_target(row["mode"], row["target"])
+    description = f'{row["mode"]}{" " + target if target else ""} via WPSD'
     if row["ysf_room"]:
-        description = f'YSF room {row["ysf_room"]} | {row["target"]} via WPSD'
+        description = f'YSF room {row["ysf_room"]} via WPSD'
     elif row["mode"] == "YSF":
         hotspot = contact_hotspot(row, settings)
         status = SOURCE_STATUS.get(hotspot["id"], {})
@@ -1045,9 +1053,10 @@ def review_page(settings, row):
                                   (("INTERNET", "Internet-assisted"), ("RPT", "Repeater / gateway"), ("LOS", "Direct RF / line of sight")))
     evidence = f'Possible exchange: {row["exchange_pattern"]}' if row["exchange_pattern"] else "Heard only. No A/B/A exchange was detected."
     room_note = "" if row["mode"] != "YSF" or row["ysf_room"] else "<p class='review-note'>The room at this transmission is unknown. A current room in the comment is only a suggestion; check it before logging.</p>"
+    destination = row["ysf_room"] or visible_target(row["mode"], row["target"]) or "—"
     header = f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Review {e(row["call"])}</title>{page_styles(source)}</head><body><main class='setup-shell'>
 <header class='setup-header'><h1>{e(row["call"])} <span class='muted'>/ Contact review</span></h1><a href='/'>Back to activity</a></header>
-<div class='review-meta'><span>Hotspot <strong>{e(hotspot["label"])}</strong></span><span>Mode <strong>{e(row["mode"])}</strong></span><span>Destination <strong>{e(row["ysf_room"] or row["target"])}</strong></span></div>"""
+<div class='review-meta'><span>Hotspot <strong>{e(hotspot["label"])}</strong></span><span>Mode <strong>{e(row["mode"])}</strong></span><span>Destination <strong>{e(destination)}</strong></span></div>"""
     delete = f"<a class='linkbtn danger' href='/delete?id={e(row['id'])}'>Delete entry</a>"
     if row["log_status"] == "pending":
         return header + f"""<p class='notice'>QRZ result uncertain. Check your QRZ logbook before choosing. This record stays out of ADIF export until resolved.</p><form method='post' action='/resolve'><input type='hidden' name='csrf' value='{token}'><input type='hidden' name='id' value='{e(row["id"])}'><div class='actions'><button name='resolution' value='found'>Found in QRZ</button><button class='secondary' name='resolution' value='retry'>Not in QRZ — reopen</button>{delete}</div></form>{page_footer()}</main></body></html>"""
@@ -1141,13 +1150,16 @@ def dashboard_page(settings, query):
         else:
             label, state = "Heard only", ""
         evidence = f"<span class='small'>{e(row['exchange_pattern'])}</span>" if row["exchange_pattern"] and not row["logged_at"] else ""
-        target_detail = f"<span class='small'>{e(row['target'])}</span>" if row["ysf_room"] else ""
+        target = visible_target(row["mode"], row["target"])
+        target_detail = (f"<span class='small'>{e(target)}</span>"
+                         if row["ysf_room"] and target and target.casefold() != row["ysf_room"].casefold() else "")
+        destination = row["ysf_room"] or target or "—"
         shown_time, shown_date, shown_zone = display_timestamp(row["heard_utc"], settings["display_timezone"], clock)
         time_label = "Local time" if clock == "local" else "UTC time"
         page.append(f"""<tr><td data-label='{time_label}'><div>{e(shown_time)}<span class='small'>{e(shown_date)} · {e(shown_zone)}</span></div></td>
 <td data-label='Station'><div><span class='call'>{e(row["call"])}</span><span class='small'>{e(row["direction"])} · {e(row["duration"])} s</span></div></td>
 <td data-label='Hotspot'>{e(hotspot["label"])}</td><td data-label='Mode'><span class='mode'>{e(row["mode"])}</span></td>
-<td data-label='Destination'><div>{e(row["ysf_room"] or row["target"] or "—")}{target_detail}</div></td>
+<td data-label='Destination'><div>{e(destination)}{target_detail}</div></td>
 <td data-label='Status'><div><span class='state {state}'>{label}</span>{evidence}</div></td>
 <td data-label='Actions'><div class='row-actions'><a href='/review?id={e(row["id"])}'>{'Open' if row["logged_at"] and row["log_status"] != "pending" else 'Review'}</a><a class='delete' href='/delete?id={e(row["id"])}'>Delete</a></div></td></tr>""")
     if not entries:

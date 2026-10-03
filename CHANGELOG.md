@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0-beta.8
+
+- Hide WPSD's raw YSF DG-ID from destinations and default QRZ comments while retaining it internally for exchange matching.
+
 ## 0.8.0-beta.7
 
 - Read YSF room names from the current WPSD sidebar layout while retaining support for older dashboard markup.
