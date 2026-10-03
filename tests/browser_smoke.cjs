@@ -53,7 +53,7 @@ async function fits(page) {
         assert(await page.getByRole('link', { name: 'Possible exchanges', exact: true }).evaluate(link => link.classList.contains('active')));
         await page.getByRole('link', { name: 'Activity queue', exact: true }).click();
         await page.getByRole('link', { name: 'UTC', exact: true }).click();
-        assert.equal(await page.getByRole('columnheader', { name: 'UTC time', exact: true }).count(), 1);
+        assert.equal(await page.locator('thead th').first().textContent(), 'UTC time');
         await page.screenshot({ path: `${output}/${engine}-${device}-${colorScheme}.png`, fullPage: true });
         await page.getByRole('link', { name: 'Review', exact: true }).first().click();
         await fits(page);
