@@ -20,9 +20,9 @@ from html.parser import HTMLParser
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
-VERSION = "0.8.0-beta.8"
+VERSION = "0.8.0-beta.9"
 ACTIVITY_LIMIT = 50
-MAX_UNLOGGED_PER_HOTSPOT = 2500
+MAX_QUEUE_ENTRIES = 50
 MAX_ACTIVITY_PER_HOTSPOT = 5000
 UTC = dt.timezone.utc
 CALL = re.compile(r"^[A-Z0-9]{1,4}[0-9][A-Z0-9]{1,5}(?:/[A-Z0-9]{1,8})?$")
@@ -48,6 +48,7 @@ DEFAULTS = {
     "wpsd_timezone": "UTC",
     "display_timezone": "UTC",
     "display_time_mode": "local",
+    "display_hour_format": "24",
     "qrz_api_key": "",
     "poll_seconds": "10",
     "poll_limit": "40",
@@ -67,7 +68,49 @@ def page_footer(note=""):
             "<span class='independence'>Independent project; not affiliated with or endorsed by WPSD or QRZ.</span></footer>")
 
 
-BRAND = "<img class='brand-logo' src='/assets/hotspot-logger.png' alt='Hotspot Logger — Created by KF0WSS' width='2172' height='724'>"
+BRAND = ("<a class='brand-home' href='/' aria-label='Hotspot Logger home'>"
+         "<img class='brand-logo' src='/assets/hotspot-logger.png' alt='Hotspot Logger — Created by KF0WSS' width='2172' height='724'></a>")
+
+DASHBOARD_REFRESH_SCRIPT = """
+(() => {
+  const selectors = ['.source-strip', '.summary-line', '.table-wrap tbody'];
+  let refreshing = false;
+
+  async function refreshDashboard() {
+    const table = document.querySelector('.table-wrap');
+    if (refreshing || document.hidden || (table && table.contains(document.activeElement))) return;
+    refreshing = true;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 4000);
+    try {
+      const response = await fetch(window.location.href, {
+        cache: 'no-store', credentials: 'same-origin', signal: controller.signal,
+        headers: {'X-Hotspot-Logger-Refresh': '1'}
+      });
+      if (!response.ok) return;
+      const next = new DOMParser().parseFromString(await response.text(), 'text/html');
+      for (const selector of selectors) {
+        const currentNode = document.querySelector(selector);
+        const nextNode = next.querySelector(selector);
+        if (currentNode && nextNode && currentNode.innerHTML !== nextNode.innerHTML) {
+          currentNode.replaceWith(nextNode.cloneNode(true));
+        }
+      }
+    } catch (error) {
+      if (error.name !== 'AbortError') console.debug('Dashboard refresh will retry.');
+    } finally {
+      window.clearTimeout(timeout);
+      refreshing = false;
+    }
+  }
+
+  const refreshMs = Math.max(3000, Number(document.body.dataset.refreshMs) || 5000);
+  window.setInterval(refreshDashboard, refreshMs);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshDashboard();
+  });
+})();
+"""
 
 
 def db():
@@ -220,6 +263,9 @@ def save_configuration(form, initial=False):
     display_time_mode = form.get("display_time_mode", current["display_time_mode"])
     if display_time_mode not in ("local", "utc"):
         raise ValueError("Choose Local or UTC as the default clock")
+    display_hour_format = form.get("display_hour_format", current["display_hour_format"])
+    if display_hour_format not in ("12", "24"):
+        raise ValueError("Choose a 12-hour or 24-hour clock")
 
     try:
         poll_seconds = int(form.get("poll_seconds", "10"))
@@ -263,6 +309,7 @@ def save_configuration(form, initial=False):
         "wpsd_timezone": timezone,
         "display_timezone": display_timezone,
         "display_time_mode": display_time_mode,
+        "display_hour_format": display_hour_format,
         "qrz_api_key": selected_qrz_key,
         "poll_seconds": str(poll_seconds),
         "poll_limit": str(poll_limit),
@@ -327,12 +374,13 @@ def timestamp(raw, timezone="UTC"):
         return None
 
 
-def display_timestamp(raw, timezone="UTC", clock="utc"):
+def display_timestamp(raw, timezone="UTC", clock="utc", hour_format="24"):
     instant = dt.datetime.fromisoformat(raw)
     if instant.tzinfo is None:
         instant = instant.replace(tzinfo=UTC)
     shown = instant.astimezone(ZoneInfo(timezone) if clock == "local" else UTC)
-    return shown.strftime("%H:%M:%S"), shown.strftime("%Y-%m-%d"), shown.tzname() or "UTC"
+    shown_time = shown.strftime("%I:%M:%S %p").lstrip("0") if hour_format == "12" else shown.strftime("%H:%M:%S")
+    return shown_time, shown.strftime("%Y-%m-%d"), shown.tzname() or "UTC"
 
 
 def extract_rows(payload):
@@ -663,15 +711,16 @@ def poll_once(settings=None):
                            [(pattern, identity) for identity, pattern in matches.items()])
         retention_cutoff = (dt.datetime.now(UTC)-dt.timedelta(days=int(settings["queue_retention_days"]))).isoformat()
         cx.execute("DELETE FROM activity WHERE heard_utc < ?", (retention_cutoff,))
-        cx.execute("DELETE FROM heard WHERE logged_at IS NULL AND first_seen < ?", (retention_cutoff,))
+        cx.execute("""DELETE FROM heard WHERE logged_at IS NULL
+            AND COALESCE(log_status,'') != 'pending' AND heard_utc < ?""", (retention_cutoff,))
         cx.execute("""DELETE FROM activity WHERE id IN (
             SELECT id FROM activity WHERE hotspot_id=? AND source_url=?
             ORDER BY heard_utc DESC,id DESC LIMIT -1 OFFSET ?)""",
                    (settings["hotspot_id"], url, MAX_ACTIVITY_PER_HOTSPOT))
-        cx.execute("""DELETE FROM heard WHERE logged_at IS NULL AND id IN (
-            SELECT id FROM heard WHERE hotspot_id=? AND logged_at IS NULL
-            ORDER BY first_seen DESC,id DESC LIMIT -1 OFFSET ?)""",
-                   (settings["hotspot_id"], MAX_UNLOGGED_PER_HOTSPOT))
+        cx.execute("""DELETE FROM heard WHERE logged_at IS NULL
+            AND COALESCE(log_status,'') != 'pending' AND id IN (
+            SELECT id FROM heard WHERE logged_at IS NULL AND COALESCE(log_status,'') != 'pending'
+            ORDER BY heard_utc DESC,id DESC LIMIT -1 OFFSET ?)""", (MAX_QUEUE_ENTRIES,))
     status["last_ok"] = dt.datetime.now(UTC).isoformat()
     STATUS.update(last_ok=status["last_ok"], error=status["error"])
     return len(parsed)
@@ -776,7 +825,7 @@ def qrz_insert(adif, key, station):
 CSS = """<style>
 :root{color-scheme:dark;--bg:#111418;--card:#191e24;--card2:#20262d;--line:#343d47;--text:#eef1f4;--muted:#a2aab4;--accent:#64b5c4;--accentText:#101418;--field:#14191f;--blue:#9cc9d4;--warn:#e6bd73;--warnBg:#332b1f}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,sans-serif}a{color:var(--blue)}button,input,select{font:inherit}button,.linkbtn{display:inline-block;padding:7px 12px;border:1px solid var(--accent);border-radius:4px;background:var(--accent);color:var(--accentText);font-weight:600;text-decoration:none;cursor:pointer}.secondary{background:transparent;border-color:var(--line);color:var(--text)}.danger{background:transparent!important;border-color:#a65460!important;color:#ecadb5!important}button:disabled{opacity:.45;cursor:not-allowed}.shell{max-width:1480px;margin:auto;padding:24px 32px}.site-header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:20px;border-bottom:1px solid var(--line)}h1{font-size:23px;font-weight:650;letter-spacing:-.4px;margin:0}h2{font-size:17px;font-weight:600;margin:0 0 12px}p{margin:8px 0}.brand-kicker{font-size:12px;color:var(--muted)}.header-actions,.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.muted,time,.field-help{color:var(--muted);font-size:12px}.source-strip{display:flex;gap:18px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:12px 0;color:var(--muted);font-size:12px}.source-strip strong{color:var(--text);font-weight:600}.source-strip .error{color:var(--warn)}.summary-line{display:flex;gap:28px;flex-wrap:wrap;padding:20px 0;font-size:13px}.summary-line strong{font-size:17px;font-variant-numeric:tabular-nums;margin-right:6px}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}.tabs{display:flex;gap:18px;align-items:center}.tabs a{color:var(--muted);text-decoration:none;padding:7px 0;border-bottom:2px solid transparent}.tabs a.active{color:var(--text);border-color:var(--accent)}.toolbar-controls,.filters,.clock-toggle{display:flex;gap:7px;align-items:center}.toolbar-controls,.filters{margin:0}.clock-toggle{border:1px solid var(--line);border-radius:4px;padding:2px}.clock-toggle a{color:var(--muted);padding:4px 8px;text-decoration:none;border-radius:2px;font-size:12px}.clock-toggle a.active{background:var(--card2);color:var(--text)}.filters select{width:auto;max-width:230px;padding:6px 9px}.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:4px}table{border-collapse:collapse;width:100%;text-align:left;background:var(--card)}th{background:var(--card2);color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}th,td{padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:middle}tr:last-child td{border-bottom:0}tbody tr:hover{background:var(--card2)}td .small{display:block;color:var(--muted);font-size:11px;line-height:1.6}.call{font-size:15px;font-weight:650;white-space:nowrap}.mode{font-size:12px;white-space:nowrap}.row-actions{display:flex;gap:12px;align-items:center;white-space:nowrap}.row-actions a{text-decoration:none;font-size:12px}.row-actions .delete{color:#ecadb5}.state{font-size:12px}.state.possible,.state.saved{color:var(--blue)}.state.pending{color:var(--warn)}.empty{padding:34px 18px;text-align:center;color:var(--muted)}.context{margin:13px 0;color:var(--muted);font-size:12px}footer{margin-top:26px;color:var(--muted);font-size:11px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.notice{padding:11px 13px;border:1px solid var(--line);background:var(--card2);border-radius:4px;margin:16px 0}.notice.ok{border-left:3px solid var(--accent)}.setup-shell{max-width:1000px;margin:auto;padding:30px 24px}.setup-header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:24px;gap:16px}.setup-card{padding:22px 0;margin:0}.setup-grid,.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0}.setup-grid label,.grid label,.hotspot-fields label{display:flex;flex-direction:column;gap:5px;font-size:12px}.wide{grid-column:1/-1}input,select{width:100%;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--field);color:var(--text)}input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px}.help-box{font-size:12px;color:var(--muted);line-height:1.6;margin:8px 0 15px}.field-help{font-size:11px}.checkbox{display:flex!important;flex-direction:row!important;align-items:center;gap:8px!important}.checkbox input{width:auto}.hotspot-row{border:1px solid var(--line);border-radius:4px;padding:16px;margin:12px 0;background:var(--card)}.hotspot-row legend{padding:0 6px;font-size:12px;color:var(--muted)}.hotspot-fields{display:grid;grid-template-columns:1fr 2fr 1fr;gap:12px}.hotspot-row .remove-hotspot{margin-top:12px;font-size:11px;padding:4px 8px}.setup-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--line);margin-top:24px;padding-top:18px}.section-rule{border:0;border-top:1px solid var(--line);margin:26px 0}.review-meta{display:flex;gap:22px;flex-wrap:wrap;font-size:13px;color:var(--muted);padding:16px 0;border-bottom:1px solid var(--line)}.review-meta strong{color:var(--text)}.review-note{font-size:12px;color:var(--muted);margin:16px 0}code{font-size:12px;overflow-wrap:anywhere}.setup-shell .actions{margin-top:20px}
-.brand-logo{display:block;width:300px;max-width:100%;height:auto;background:#fff;border-radius:4px;padding:8px;margin-bottom:8px}.beta{display:inline-block;border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:5px;color:var(--text)}.independence{flex-basis:100%}.creator-credit{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.creator-credit a{color:inherit;text-decoration:none}
+.brand-home{display:block;width:300px;max-width:100%;text-decoration:none}.brand-logo{display:block;width:100%;height:auto;background:#fff;border-radius:4px;padding:8px;margin-bottom:8px}.beta{display:inline-block;border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:5px;color:var(--text)}.independence{flex-basis:100%}.creator-credit{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.creator-credit a{color:inherit;text-decoration:none}
 @media(max-width:850px){.shell{padding:16px}.hotspot-fields{grid-template-columns:1fr 1fr}.hotspot-fields .hotspot-url{grid-column:1/-1;grid-row:2}.table-wrap{border:0;overflow:visible}thead{display:none}table,tbody,tr,td{display:block}tbody tr{border:1px solid var(--line);border-radius:4px;padding:9px 13px;margin-bottom:10px;background:var(--card)}td{border:0;padding:4px 0;display:grid;grid-template-columns:92px 1fr;gap:8px}td:before{content:attr(data-label);font-size:11px;color:var(--muted);font-weight:400}.row-actions{margin:2px 0}.toolbar{align-items:flex-start}.source-strip{gap:9px}.summary-line{gap:18px;padding:16px 0}}
 @media(max-width:560px){.site-header{align-items:flex-start;flex-direction:column;gap:12px;padding-bottom:15px}h1{font-size:21px}.header-actions{gap:6px}.header-actions .linkbtn{font-size:12px;padding:6px 9px}.setup-shell{padding:18px 15px}.setup-grid,.grid,.hotspot-fields{grid-template-columns:1fr}.hotspot-fields .hotspot-url{grid-column:auto;grid-row:auto}.wide{grid-column:auto}.toolbar-controls,.filters{flex-wrap:wrap}.toolbar-controls{width:100%}.filters select{max-width:170px}.tabs{gap:15px;font-size:12px}.setup-actions{align-items:stretch;flex-direction:column-reverse}.setup-header{align-items:flex-start}.hotspot-row{padding:12px}.summary-line strong{font-size:15px}.review-meta{gap:12px}}
 @media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#f6f7f8;--card:#fff;--card2:#f0f2f4;--line:#d7dce1;--text:#242b32;--muted:#626c77;--accent:#286b78;--accentText:#fff;--field:#fff;--blue:#286b78;--warn:#8c600e;--warnBg:#fff5df}.danger,.row-actions .delete{color:#963340!important}}
@@ -951,6 +1000,8 @@ def setup_page(settings, edit=False, error="", saved=False):
                                 for value in (1, 3, 7, 14, 30))
     theme_options = option("wpsd", settings["theme_mode"], "Match WPSD") + option("logger", settings["theme_mode"], "Logger default")
     clock_options = option("local", settings["display_time_mode"], "Local time") + option("utc", settings["display_time_mode"], "UTC")
+    hour_options = (option("12", settings["display_hour_format"], "12-hour — 9:41 PM")
+                    + option("24", settings["display_hour_format"], "24-hour — 21:41"))
     timezone_choices = timezone_options(settings["display_timezone"])
     theme_status = " · ".join(f'{e(hotspot["label"])}: {e(THEME_CACHES.get(hotspot["url"], {}).get("status", "Waiting for WPSD colors"))}' for hotspot in hotspots)
     return f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>{title}</title>{page_styles(settings)}</head>
@@ -971,6 +1022,7 @@ def setup_page(settings, edit=False, error="", saved=False):
 <label>WPSD timestamp source zone<input required name='wpsd_timezone' value='{e(settings["wpsd_timezone"])}' placeholder='UTC'><span class='field-help'>Keep UTC for current WPSD. Change this only for an older feed that sends local timestamps without an offset.</span></label>
 <label>Local time zone<select required id='display-timezone' name='display_timezone' data-detect='{"no" if edit else "yes"}'>{timezone_choices}</select><span class='field-help'>Used for the Local clock. Your browser selects its zone during first setup; you can change it here.</span></label>
 <label>Default activity clock<select name='display_time_mode'>{clock_options}</select><span class='field-help'>The activity page also has a Local / UTC toggle.</span></label>
+<label>Time format<select name='display_hour_format'>{hour_options}</select><span class='field-help'>The activity page also has a 12h / 24h toggle.</span></label>
 <label>Theme<select name='theme_mode'>{theme_options}</select><span class='field-help'>A hotspot filter uses that hotspot's colors. All hotspots uses the first hotspot's colors.</span></label>
 <div class='wide field-help'>{theme_status}. WPSD color changes refresh within five minutes.</div>
 <label>Logger password<input {required} type='password' name='password' minlength='8' autocomplete='new-password'><span class='field-help'>{password_help}</span></label>
@@ -1020,7 +1072,7 @@ def contact_hotspot(row, settings):
 
 def visible_target(mode, target):
     target = str(target or "").strip()
-    if mode == "YSF" and re.fullmatch(r"DG\s*[- ]?\s*ID\s*[-:]?\s*\d+", target, re.I):
+    if mode == "YSF" and re.match(r"^DG\s*[- ]?\s*ID\b", target, re.I):
         return ""
     return target
 
@@ -1042,12 +1094,17 @@ def default_propagation(row):
     return "INTERNET" if row["direction"].upper() in ("NET", "NETWORK") else "RPT"
 
 
-def review_page(settings, row):
+def review_page(settings, row, query=None):
     e = html.escape
+    query = query or {}
+    hour_format = query.get("hours", [settings["display_hour_format"]])[0]
+    if hour_format not in ("12", "24"):
+        hour_format = settings["display_hour_format"]
     hotspot = contact_hotspot(row, settings)
     source = source_settings(settings, hotspot) if hotspot["url"] else settings
     token = form_token(settings)
-    local_time, local_date, local_zone = display_timestamp(row["heard_utc"], settings["display_timezone"], "local")
+    local_time, local_date, local_zone = display_timestamp(
+        row["heard_utc"], settings["display_timezone"], "local", hour_format)
     mode_options = "".join(option(mode, row["mode"]) for mode in MODE_SPECS)
     propagation_options = "".join(option(code, default_propagation(row), label) for code, label in
                                   (("INTERNET", "Internet-assisted"), ("RPT", "Repeater / gateway"), ("LOS", "Direct RF / line of sight")))
@@ -1055,7 +1112,7 @@ def review_page(settings, row):
     room_note = "" if row["mode"] != "YSF" or row["ysf_room"] else "<p class='review-note'>The room at this transmission is unknown. A current room in the comment is only a suggestion; check it before logging.</p>"
     destination = row["ysf_room"] or visible_target(row["mode"], row["target"]) or "—"
     header = f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Review {e(row["call"])}</title>{page_styles(source)}</head><body><main class='setup-shell'>
-<header class='setup-header'><h1>{e(row["call"])} <span class='muted'>/ Contact review</span></h1><a href='/'>Back to activity</a></header>
+<header class='setup-header'><h1>{e(row["call"])} <span class='muted'>/ Contact review</span></h1><a href='{e("/?" + urllib.parse.urlencode({"hours": hour_format}))}'>Back to activity</a></header>
 <div class='review-meta'><span>Hotspot <strong>{e(hotspot["label"])}</strong></span><span>Mode <strong>{e(row["mode"])}</strong></span><span>Destination <strong>{e(destination)}</strong></span></div>"""
     delete = f"<a class='linkbtn danger' href='/delete?id={e(row['id'])}'>Delete entry</a>"
     if row["log_status"] == "pending":
@@ -1091,6 +1148,9 @@ def dashboard_page(settings, query):
     clock = query.get("clock", [settings["display_time_mode"]])[0]
     if clock not in ("local", "utc"):
         clock = settings["display_time_mode"]
+    hour_format = query.get("hours", [settings["display_hour_format"]])[0]
+    if hour_format not in ("12", "24"):
+        hour_format = settings["display_hour_format"]
     mode = query.get("mode", [""])[0]
     if mode not in MODE_SPECS:
         mode = ""
@@ -1104,7 +1164,7 @@ def dashboard_page(settings, query):
     base_where = " AND ".join(conditions) or "1=1"
     with db() as cx:
         counts = cx.execute(f"""SELECT
-            SUM(CASE WHEN logged_at IS NULL THEN 1 ELSE 0 END),
+            SUM(CASE WHEN logged_at IS NULL AND COALESCE(log_status,'')!='pending' THEN 1 ELSE 0 END),
             SUM(CASE WHEN logged_at IS NULL AND exchange_pattern!='' THEN 1 ELSE 0 END),
             SUM(CASE WHEN log_status='pending' THEN 1 ELSE 0 END),
             SUM(CASE WHEN logged_at IS NOT NULL AND COALESCE(log_status,'')!='pending' THEN 1 ELSE 0 END)
@@ -1124,20 +1184,28 @@ def dashboard_page(settings, query):
         source_status.append(f"<span class='{'error' if status.get('error') else ''}'><strong>{e(hotspot['label'])}</strong> · {e(state)}{room}</span>")
     tabs = []
     for code, label in (("exchanges", "Possible exchanges"), ("queue", "Activity queue"), ("saved", "Saved")):
-        url = "/?" + urllib.parse.urlencode({"view": code, "hotspot": selected, "mode": mode, "clock": clock})
+        url = "/?" + urllib.parse.urlencode({"view": code, "hotspot": selected, "mode": mode,
+                                             "clock": clock, "hours": hour_format})
         tabs.append(f"<a class='{'active' if view == code else ''}' href='{e(url)}'>{label}</a>")
     clocks = []
     for code, label in (("local", "Local"), ("utc", "UTC")):
-        url = "/?" + urllib.parse.urlencode({"view": view, "hotspot": selected, "mode": mode, "clock": code})
+        url = "/?" + urllib.parse.urlencode({"view": view, "hotspot": selected, "mode": mode,
+                                             "clock": code, "hours": hour_format})
         clocks.append(f"<a class='{'active' if clock == code else ''}' href='{e(url)}'>{label}</a>")
+    hour_formats = []
+    for code, label in (("12", "12h"), ("24", "24h")):
+        url = "/?" + urllib.parse.urlencode({"view": view, "hotspot": selected, "mode": mode,
+                                             "clock": clock, "hours": code})
+        hour_formats.append(f"<a class='{'active' if hour_format == code else ''}' href='{e(url)}'>{label}</a>")
     hotspot_options = option("", selected, "All hotspots") + "".join(option(item["id"], selected, item["label"]) for item in hotspots)
     mode_options = option("", mode, "All modes") + "".join(option(item, mode) for item in MODE_SPECS)
     summary = "".join(f"<span><strong>{count or 0}</strong>{label}</span>" for count, label in zip(counts, ("in queue", "possible exchanges", "need QRZ check", "saved")))
+    refresh_ms = max(3000, min(10000, int(settings["poll_seconds"]) * 500))
     page = [f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Hotspot Logger</title>{page_styles(source)}</head>
-<body><main class='shell'><header class='site-header'><div><h1>{BRAND}</h1><span class='brand-kicker'>{e(settings["station_callsign"])} / Contact review</span></div>
-<nav class='header-actions' aria-label='Page actions'><a class='linkbtn secondary' href='/settings'>Settings</a><a class='linkbtn secondary' href='{e("/?" + urllib.parse.urlencode({"view": view, "hotspot": selected, "mode": mode, "clock": clock}))}'>Refresh</a><a class='linkbtn secondary' href='/export.adi'>ADIF export</a><a class='linkbtn danger' href='{e("/clear?" + urllib.parse.urlencode({"hotspot": selected}))}'>Clear queue</a></nav></header>
+<body data-refresh-ms='{refresh_ms}'><main class='shell'><header class='site-header'><div><h1>{BRAND}</h1><span class='brand-kicker'>{e(settings["station_callsign"])} / Contact review</span></div>
+<nav class='header-actions' aria-label='Page actions'><a class='linkbtn secondary' href='/settings'>Settings</a><a class='linkbtn secondary' href='{e("/?" + urllib.parse.urlencode({"view": view, "hotspot": selected, "mode": mode, "clock": clock, "hours": hour_format}))}'>Refresh</a><a class='linkbtn secondary' href='/export.adi'>ADIF export</a><a class='linkbtn danger' href='{e("/clear?" + urllib.parse.urlencode({"hotspot": selected}))}'>Clear queue</a></nav></header>
 <div class='source-strip'>{"".join(source_status)}</div><div class='summary-line'>{summary}</div>
-<div class='toolbar'><nav class='tabs' aria-label='Activity views'>{"".join(tabs)}</nav><div class='toolbar-controls'><nav class='clock-toggle' aria-label='Displayed time'>{"".join(clocks)}</nav><form method='get' action='/' class='filters'><input type='hidden' name='view' value='{view}'><input type='hidden' name='clock' value='{clock}'><select name='hotspot' aria-label='Hotspot'>{hotspot_options}</select><select name='mode' aria-label='Mode'>{mode_options}</select><button class='secondary'>Apply</button></form></div></div>
+<div class='toolbar'><nav class='tabs' aria-label='Activity views'>{"".join(tabs)}</nav><div class='toolbar-controls'><nav class='clock-toggle' aria-label='Displayed time'>{"".join(clocks)}</nav><nav class='clock-toggle' aria-label='Time format'>{"".join(hour_formats)}</nav><form method='get' action='/' class='filters'><input type='hidden' name='view' value='{view}'><input type='hidden' name='clock' value='{clock}'><input type='hidden' name='hours' value='{hour_format}'><select name='hotspot' aria-label='Hotspot'>{hotspot_options}</select><select name='mode' aria-label='Mode'>{mode_options}</select><button class='secondary'>Apply</button></form></div></div>
 <div class='table-wrap'><table><thead><tr><th>{'Local time' if clock == 'local' else 'UTC time'}</th><th>Station</th><th>Hotspot</th><th>Mode</th><th>Destination</th><th>Status</th><th>Actions</th></tr></thead><tbody>"""]
     for row in entries:
         hotspot = contact_hotspot(row, settings)
@@ -1154,19 +1222,20 @@ def dashboard_page(settings, query):
         target_detail = (f"<span class='small'>{e(target)}</span>"
                          if row["ysf_room"] and target and target.casefold() != row["ysf_room"].casefold() else "")
         destination = row["ysf_room"] or target or "—"
-        shown_time, shown_date, shown_zone = display_timestamp(row["heard_utc"], settings["display_timezone"], clock)
+        shown_time, shown_date, shown_zone = display_timestamp(
+            row["heard_utc"], settings["display_timezone"], clock, hour_format)
         time_label = "Local time" if clock == "local" else "UTC time"
         page.append(f"""<tr><td data-label='{time_label}'><div>{e(shown_time)}<span class='small'>{e(shown_date)} · {e(shown_zone)}</span></div></td>
 <td data-label='Station'><div><span class='call'>{e(row["call"])}</span><span class='small'>{e(row["direction"])} · {e(row["duration"])} s</span></div></td>
 <td data-label='Hotspot'>{e(hotspot["label"])}</td><td data-label='Mode'><span class='mode'>{e(row["mode"])}</span></td>
 <td data-label='Destination'><div>{e(destination)}{target_detail}</div></td>
 <td data-label='Status'><div><span class='state {state}'>{label}</span>{evidence}</div></td>
-<td data-label='Actions'><div class='row-actions'><a href='/review?id={e(row["id"])}'>{'Open' if row["logged_at"] and row["log_status"] != "pending" else 'Review'}</a><a class='delete' href='/delete?id={e(row["id"])}'>Delete</a></div></td></tr>""")
+<td data-label='Actions'><div class='row-actions'><a href='{e("/review?" + urllib.parse.urlencode({"id": row["id"], "hours": hour_format}))}'>{'Open' if row["logged_at"] and row["log_status"] != "pending" else 'Review'}</a><a class='delete' href='/delete?id={e(row["id"])}'>Delete</a></div></td></tr>""")
     if not entries:
         message = "No possible exchanges detected. Activity queue includes heard stations you can review manually." if view == "exchanges" else ("No saved contacts in this view." if view == "saved" else "No queued activity in this view.")
         page.append(f"<tr><td colspan='7' class='empty'>{message}</td></tr>")
     page.append(f"""</tbody></table></div><p class='context'>A/B/A and B/A/B timing can suggest an exchange involving your RF callsign. It is not a confirmed QSO. Only you decide what to log.</p>
-{page_footer(f'Latest {ACTIVITY_LIMIT} entries in this view · Times {settings["display_timezone"] if clock == "local" else "UTC"}')}</main></body></html>""")
+{page_footer(f'Latest {ACTIVITY_LIMIT} entries in this view · Times {settings["display_timezone"] if clock == "local" else "UTC"}')}</main><script>{DASHBOARD_REFRESH_SCRIPT}</script></body></html>""")
     return "".join(page)
 
 def removal_page(settings, row=None, count=0, hotspot=None):
@@ -1217,7 +1286,7 @@ class Handler(BaseHTTPRequestHandler):
         scripts = re.findall(r"<script>(.*?)</script>", content, re.S) if isinstance(content, str) else []
         hashes = " ".join("'sha256-" + base64.b64encode(hashlib.sha256(script.encode()).digest()).decode() + "'" for script in scripts)
         script_policy = f"; script-src {hashes}" if hashes else ""
-        self.send_header("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" + script_policy)
+        self.send_header("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" + script_policy)
         for key, val in (headers or {}).items():
             self.send_header(key, val)
         self.end_headers()
@@ -1265,12 +1334,13 @@ class Handler(BaseHTTPRequestHandler):
             saved = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("saved") == ["1"]
             return self.send_page(200, setup_page(settings, edit=True, saved=saved))
         if path == "/review":
-            identity = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("id", [""])[0]
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            identity = query.get("id", [""])[0]
             with db() as cx:
                 row = cx.execute("SELECT * FROM heard WHERE id=?", (identity,)).fetchone()
             if not row:
                 return self.send_page(404, "Entry no longer available", "text/plain")
-            return self.send_page(200, review_page(settings, row))
+            return self.send_page(200, review_page(settings, row, query))
         if path == "/delete":
             identity = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("id", [""])[0]
             with db() as cx:

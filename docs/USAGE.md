@@ -39,11 +39,13 @@ Start with a **10-second** poll interval and **40 rows** per hotspot. A busy roo
 
 Keep **WPSD timestamp source zone → UTC** for current WPSD. Only change it when an older feed supplies local timestamps without an offset.
 
-Select **Local time zone**, such as `America/Chicago`, and choose the default activity clock. The browser selects its detected zone during first setup. The **Local / UTC** toggle on the activity page changes the displayed clock without changing the UTC time sent to QRZ or written to ADIF.
+Select **Local time zone**, such as `America/Chicago`, then choose the default activity clock and time format. The browser selects its detected zone during first setup. The **Local / UTC** and **12h / 24h** toggles change the activity display without changing the UTC time sent to QRZ or written to ADIF.
 
-**Activity queue retention** controls when unlogged heard activity expires. The default is one day. Per-hotspot storage caps provide another bound for unusually busy feeds. Saved and uploaded contacts are retained in **Saved** and remain available to ADIF export.
+**Activity queue retention** controls when unlogged heard activity expires. The default is one day, and the queue keeps only the newest 50 entries across all hotspots. Saved contacts and uncertain QRZ submissions are protected from that limit. Saved and uploaded contacts remain available to ADIF export.
 
 ## Review and save a contact
+
+Leave the activity page open while operating. It refreshes the visible rows, counts, hotspot connection state, and YSF room automatically without moving the page or resetting its filters. It pauses in a hidden tab and catches up when you return.
 
 1. Make a two-way contact on your radio.
 2. Start in **Possible exchanges**. If the contact was not detected there, open **Activity queue** and select the hotspot or mode if needed.

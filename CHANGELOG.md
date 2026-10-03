@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0-beta.9
+
+- Refresh dashboard activity, counts, hotspot state, and YSF room without reloading the page.
+- Link the Hotspot Logger logo to the main activity page.
+- Add a 12 / 24-hour dashboard toggle and a default time-format setting.
+- Keep the review queue at the newest 50 entries and protect saved contacts and uncertain QRZ submissions.
+- Hide extended WPSD targets such as `DG-ID 0 at CALLSIGN` from YSF contact details.
+
 ## 0.8.0-beta.8
 
 - Hide WPSD's raw YSF DG-ID from destinations and default QRZ comments while retaining it internally for exchange matching.

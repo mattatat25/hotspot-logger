@@ -1,11 +1,13 @@
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
+import hashlib
 import io
 import http.client
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import tempfile
 import threading
@@ -145,6 +147,7 @@ class AuditTests(unittest.TestCase):
             self.assertIn("class='beta'>Beta", page)
             self.assertIn('KF0WSS', page)
             self.assertIn("href='https://www.qrz.com/db/KF0WSS'", page)
+            self.assertIn("class='brand-home' href='/'", page)
             self.assertIn("img-src 'self'", response.headers['Content-Security-Policy'])
         with self.request(host, '/assets/hotspot-logger.png') as response:
             self.assertEqual(response.headers['Content-Type'], 'image/png')
@@ -152,7 +155,18 @@ class AuditTests(unittest.TestCase):
         app.save_configuration(self.form, initial=True)
         for path in ('/', '/settings', '/clear'):
             with self.request(host, path) as response:
-                self.assertIn("class='beta'>Beta", response.read().decode())
+                page = response.read().decode()
+                self.assertIn("class='beta'>Beta", page)
+                if path in ('/', '/settings'):
+                    self.assertIn("class='brand-home' href='/'", page)
+                if path == '/':
+                    policy = response.headers['Content-Security-Policy']
+                    self.assertIn("connect-src 'self'", policy)
+                    self.assertIn("data-refresh-ms='5000'", page)
+                    self.assertIn('refreshDashboard', page)
+                    script = re.search(r"<script>(.*?)</script>", page, re.S).group(1)
+                    digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+                    self.assertIn("'sha256-" + digest + "'", policy)
         with self.assertRaises(urllib.error.HTTPError) as denied:
             self.request(host, '/assets/../app.py')
         self.assertEqual(denied.exception.code, 404)

@@ -187,6 +187,7 @@ class FeatureTests(unittest.TestCase):
                          "YSF room US-KCWide via WPSD")
         self.assertEqual(app.visible_target("YSF", "DG-ID 0"), "")
         self.assertEqual(app.visible_target("YSF", "DG ID: 12"), "")
+        self.assertEqual(app.visible_target("YSF", "DG-ID 0 at N7DEN"), "")
         self.assertEqual(app.visible_target("DMR", "TG 91"), "TG 91")
         dashboard = app.dashboard_page(self.settings, {"view": ["queue"]})
         review = app.review_page(self.settings, contact)
@@ -304,7 +305,7 @@ class FeatureTests(unittest.TestCase):
                 for index, call in enumerate(("W1ABC", "W2ABC"))]
         with app.db() as cx:
             cx.executemany("INSERT INTO heard (id,call,mode,target,direction,heard_utc,duration,raw,first_seen) VALUES (?,?,?,?,?,?,?,?,?)", rows)
-            cx.execute("UPDATE heard SET first_seen=?", (old,))
+            cx.execute("UPDATE heard SET first_seen=?,heard_utc=?", (old, old))
             cx.execute("UPDATE heard SET logged_at=?,log_status='save',log_adif='<CALL:5>W2ABC<EOR>' WHERE id=?",
                        (old, rows[1][0]))
             cx.execute("INSERT INTO activity VALUES(?,?,?,?,?,?,?,?)",
@@ -323,16 +324,27 @@ class FeatureTests(unittest.TestCase):
                 (id,call,mode,target,direction,heard_utc,duration,raw,first_seen,hotspot_id)
                 VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 ((f"heard-{index:05d}", "W1ABC", "YSF", "DG-ID 0", "Net", now, "8", "{}", now, source["id"])
-                 for index in range(app.MAX_UNLOGGED_PER_HOTSPOT + 2)))
+                 for index in range(app.MAX_QUEUE_ENTRIES + 2)))
+            cx.execute("""INSERT INTO heard
+                (id,call,mode,target,direction,heard_utc,duration,raw,first_seen,hotspot_id,log_status)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                ("pending-contact", "W2ABC", "YSF", "DG-ID 0", "Net", now, "8", "{}", now,
+                 source["id"], "pending"))
             cx.executemany("INSERT INTO activity VALUES(?,?,?,?,?,?,?,?)",
                 ((f"activity-{index:05d}", source["id"], source["url"], "W1ABC", "YSF", "Net", now, "8")
                  for index in range(app.MAX_ACTIVITY_PER_HOTSPOT + 2)))
         self.poll(source, [self.transmission("W3ABC", seconds=5)])
         with app.db() as cx:
-            heard_count = cx.execute("SELECT COUNT(*) FROM heard WHERE hotspot_id=? AND logged_at IS NULL", (source["id"],)).fetchone()[0]
+            heard_count = cx.execute("""SELECT COUNT(*) FROM heard WHERE logged_at IS NULL
+                AND COALESCE(log_status,'')!='pending'""").fetchone()[0]
             activity_count = cx.execute("SELECT COUNT(*) FROM activity WHERE hotspot_id=?", (source["id"],)).fetchone()[0]
-        self.assertLessEqual(heard_count, app.MAX_UNLOGGED_PER_HOTSPOT)
+            pending = cx.execute("SELECT id FROM heard WHERE id='pending-contact'").fetchone()
+        self.assertLessEqual(heard_count, app.MAX_QUEUE_ENTRIES)
         self.assertLessEqual(activity_count, app.MAX_ACTIVITY_PER_HOTSPOT)
+        self.assertIsNotNone(pending)
+        page = app.dashboard_page(self.settings, {"view": ["queue"]})
+        self.assertIn("<strong>50</strong>in queue", page)
+        self.assertEqual(page.count("data-label='Station'"), app.ACTIVITY_LIMIT)
 
     def test_gui_filters_review_frequency_protocol_and_scoped_clear(self):
         first, second = self.sources()
@@ -349,15 +361,20 @@ class FeatureTests(unittest.TestCase):
         self.assertIn("Times America/Chicago", page)
         utc_page, _ = self.request(host, "/?view=queue&clock=utc&hotspot=" + second["id"])
         self.assertIn("<th>UTC time</th>", utc_page)
-        review, _ = self.request(host, "/review?id=" + nx["id"])
+        twelve_hour_page, _ = self.request(host, "/?view=queue&clock=local&hours=12&hotspot=" + second["id"])
+        self.assertRegex(twelve_hour_page, r"\d{1,2}:\d{2}:\d{2} [AP]M")
+        self.assertIn("aria-label='Time format'", twelve_hour_page)
+        review, _ = self.request(host, "/review?id=" + nx["id"] + "&hours=12")
         self.assertIn("439.550", review)
         self.assertNotIn("441.425", review)
         self.assertIn("NXDN 65000", review)
         self.assertIn("Heard only", review)
         self.assertIn("Local:", review)
         self.assertIn("America/Chicago", review)
+        self.assertRegex(review, r"Local: \d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2} [AP]M")
         settings_page, headers = self.request(host, "/settings")
         self.assertIn("Add hotspot", settings_page)
+        self.assertIn("name='display_hour_format'", settings_page)
         self.assertIn("YSF desk", settings_page)
         self.assertIn("DMR travel", settings_page)
         self.assertIn("script-src 'sha256-", headers["Content-Security-Policy"])

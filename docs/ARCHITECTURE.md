@@ -47,7 +47,7 @@ sequenceDiagram
 
 ## Storage
 
-The SQLite database uses WAL mode and lives at `/data/logger.sqlite` in a named Docker volume. It contains configuration, the QRZ key, a salted web-password hash, and contact state. Unlogged candidates expire after the GUI-configured 1–30 day retention period, which defaults to one day. Per-hotspot row caps keep unusually busy feeds bounded. The GUI can delete individual entries and their ADIF copies, or clear unlogged candidates while retaining saved contacts and uncertain QRZ submissions. A separate table retains only removed record IDs to prevent their reimport. Local deletion does not call the QRZ API.
+The SQLite database uses WAL mode and lives at `/data/logger.sqlite` in a named Docker volume. It contains configuration, the QRZ key, a salted web-password hash, and contact state. Unlogged candidates expire after the GUI-configured 1–30 day retention period, which defaults to one day, and the review queue keeps the newest 50 entries across all hotspots. Saved contacts and uncertain QRZ submissions are excluded from queue pruning. The GUI can delete individual entries and their ADIF copies, or clear unlogged candidates while retaining saved contacts and uncertain QRZ submissions. A separate table retains only removed record IDs to prevent their reimport. Local deletion does not call the QRZ API.
 
 Theme matching reads the configured hotspot's public dashboard and same-origin theme stylesheet in the polling worker. Colors are refreshed every five minutes and cached in memory. Only validated hex colors are rendered into the logger's own CSS variables; remote scripts, CSS rules, and external stylesheet links are not imported. A GUI preference can disable matching. Theme failures do not interrupt contact polling.
 

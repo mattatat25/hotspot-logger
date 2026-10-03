@@ -64,6 +64,8 @@ class LoggerTests(unittest.TestCase):
                          ("19:25:49", "2026-10-02", "CDT"))
         self.assertEqual(app.display_timestamp("2026-10-03T00:25:49+00:00", "America/Chicago", "utc"),
                          ("00:25:49", "2026-10-03", "UTC"))
+        self.assertEqual(app.display_timestamp("2026-10-03T00:25:49+00:00", "America/Chicago", "local", "12"),
+                         ("7:25:49 PM", "2026-10-02", "CDT"))
 
     def test_first_run_gui_setup_and_how_to(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -82,6 +84,7 @@ class LoggerTests(unittest.TestCase):
                     self.assertIn("My Logbook → Settings → API", page)
                     self.assertIn("manual.wpsd.radio/advanced/api", page)
                     self.assertIn("Local time zone", page)
+                    self.assertIn("name='display_hour_format'", page)
                     self.assertIn("<select required id='display-timezone'", page)
                     self.assertIn("value='America/Chicago'", page)
                     self.assertNotIn("timezone-list", page)
@@ -91,7 +94,7 @@ class LoggerTests(unittest.TestCase):
                         "csrf": token, "station_callsign": "N0CALL",
                         "wpsd_url": "http://192.168.1.50/api/", "rf_freq_mhz": "446.425",
                         "wpsd_timezone": "UTC", "poll_seconds": "10", "poll_limit": "40",
-                        "display_timezone": "America/Chicago", "display_time_mode": "local",
+                        "display_timezone": "America/Chicago", "display_time_mode": "local", "display_hour_format": "24",
                         "qrz_api_key": "TEST-KEY", "password": "testing-password-123456",
                         "password_confirm": "testing-password-123456",
                     }
@@ -130,7 +133,7 @@ class LoggerTests(unittest.TestCase):
                         "csrf": settings_token, "station_callsign": "N0CALL",
                         "wpsd_url": "http://192.168.1.50/api/", "rf_freq_mhz": "446.450",
                         "wpsd_timezone": "UTC", "poll_seconds": "15", "poll_limit": "75",
-                        "display_timezone": "America/Chicago", "display_time_mode": "local",
+                        "display_timezone": "America/Chicago", "display_time_mode": "local", "display_hour_format": "12",
                         "qrz_api_key": "", "password": "", "password_confirm": "",
                     }
                     update_request = urllib.request.Request(f"http://{host}/settings",
@@ -149,6 +152,7 @@ class LoggerTests(unittest.TestCase):
                     self.assertEqual(updated["rf_freq_mhz"], "446.450")
                     self.assertEqual(updated["qrz_api_key"], "TEST-KEY")
                     self.assertEqual(updated["display_timezone"], "America/Chicago")
+                    self.assertEqual(updated["display_hour_format"], "12")
                 finally:
                     server.shutdown()
                     server.server_close()
@@ -179,7 +183,7 @@ class LoggerTests(unittest.TestCase):
                 app.init_db()
                 self.configure("TEST-KEY")
                 settings = app.get_settings()
-                base = dt.datetime(2026, 9, 25, 1, 43, tzinfo=dt.timezone.utc)
+                base = dt.datetime.now(dt.timezone.utc).replace(microsecond=0) - dt.timedelta(minutes=10)
                 feed = [{"callsign": "W1ABC", "mode": "DMR TS2", "target": "91", "src": "Net",
                          "time_utc": (base + dt.timedelta(seconds=i)).isoformat()} for i in range(103)]
                 rows = [app.parse_row(row, "N0CALL") for row in feed]

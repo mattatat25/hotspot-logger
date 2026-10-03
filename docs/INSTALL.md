@@ -86,7 +86,8 @@ Keep the folder name unchanged after installation. It determines which Docker da
 | WPSD timestamp source zone | `UTC` | Only change it for an older feed that reports local time without an offset. |
 | Local time zone | Browser-detected | Selectable list used by the Local activity clock and the local reference on contact review. |
 | Default activity clock | Local time | The activity page can switch between Local and UTC at any time. |
-| Activity queue retention | 1 day | Removes old unlogged activity; saved and uploaded contacts remain in Saved. |
+| Time format | 24-hour | The activity page can switch between 12h and 24h at any time. |
+| Activity queue retention | 1 day | Removes old unlogged activity; the newest 50 remain in queue while saved and uploaded contacts remain in Saved. |
 | Logger password | At least eight characters, entered twice | Choose a password for this logger. |
 
 Leave the poll interval at **10 seconds**, rows at **40**, and theme at **Match WPSD** to start. Select **Add hotspot** for additional sources, then **Start logger**.

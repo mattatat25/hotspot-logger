@@ -16,10 +16,14 @@ async function fits(page) {
   const browser = await chromium.launch();
   const context = await browser.newContext({ httpCredentials: credentials, viewport: { width: 1440, height: 1000 } });
   const page = await context.newPage();
+  const setupErrors = [];
+  page.on('pageerror', error => setupErrors.push(error.message));
   await page.goto(base);
   await page.locator('.brand-logo').evaluate(img => img.decode());
+  assert.equal(await page.getByRole('link', { name: 'Hotspot Logger home', exact: true }).getAttribute('href'), '/');
   assert.equal(await page.locator('#display-timezone').evaluate(field => field.tagName), 'SELECT');
   assert.equal(await page.locator('#display-timezone option[value="America/Chicago"]').count(), 1);
+  assert.equal(await page.locator('[name=display_hour_format]').inputValue(), '24');
   assert.equal(await page.locator('[name=queue_retention_days]').inputValue(), '1');
   await page.screenshot({ path: `${output}/setup-desktop.png`, fullPage: true });
   await page.getByRole('button', { name: 'Add hotspot', exact: true }).click();
@@ -36,6 +40,19 @@ async function fits(page) {
   await page.getByRole('button', { name: 'Start logger', exact: true }).click();
   await page.waitForURL(base + '/');
   await fits(page);
+  await page.getByRole('link', { name: 'Activity queue', exact: true }).click();
+  await page.getByRole('link', { name: '12h', exact: true }).click();
+  assert.match(await page.locator('tbody tr').first().locator('td').first().innerText(), /\d{1,2}:\d{2}:\d{2} [AP]M/);
+  assert.equal(await page.getByText('W9LIVE', { exact: true }).count(), 0);
+  await page.evaluate(() => { window.dashboardStayedOpen = true; });
+  const inserted = await context.request.get(base + '/__test/add-live-contact');
+  assert.equal(inserted.status(), 204);
+  await page.getByText('W9LIVE', { exact: true }).waitFor({ timeout: 12000 });
+  assert.equal(await page.evaluate(() => window.dashboardStayedOpen), true);
+  const liveRow = page.locator('tbody tr').filter({ hasText: 'W9LIVE' });
+  assert.equal(await liveRow.count(), 1);
+  assert(!(await liveRow.innerText()).includes('DG-ID'));
+  assert.deepEqual(setupErrors, []);
   await browser.close();
 
   for (const [engine, type] of Object.entries({ chromium, webkit })) {
@@ -51,6 +68,7 @@ async function fits(page) {
         assert.equal(await page.locator('.brand-logo').evaluate(img => img.naturalWidth), 2172);
         const bounds = await page.locator('.brand-logo').boundingBox();
         assert(bounds.width > 200 && bounds.height > 50);
+        assert.equal(await page.getByRole('link', { name: 'Hotspot Logger home', exact: true }).getAttribute('href'), '/');
         await fits(page);
         assert(await page.locator('footer').innerText().then(text => text.includes('KF0WSS') && text.includes('Beta')));
         assert(await page.getByRole('link', { name: 'Possible exchanges', exact: true }).evaluate(link => link.classList.contains('active')));
