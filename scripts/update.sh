@@ -13,6 +13,23 @@ if [[ -n $(git status --porcelain) ]]; then
   git status --short
   exit 1
 fi
+
+current_branch=$(git branch --show-current)
+if [[ -z "$current_branch" ]]; then
+  echo "This checkout is not on a branch. Switch to a branch before updating." >&2
+  exit 1
+fi
+
 bash scripts/backup.sh
-git pull --ff-only
+git fetch --prune origin main
+
+if ! git merge-base --is-ancestor HEAD origin/main; then
+  echo "This branch cannot be updated safely with a fast-forward." >&2
+  echo "See docs/BACKUP-AND-UPDATES.md under 'Repair an older beta checkout'." >&2
+  exit 1
+fi
+
+git merge --ff-only origin/main
+git config "branch.${current_branch}.remote" origin
+git config "branch.${current_branch}.merge" refs/heads/main
 bash setup.sh

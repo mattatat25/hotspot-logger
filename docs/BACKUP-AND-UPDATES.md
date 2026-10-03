@@ -34,11 +34,34 @@ Sign in with the callsign and password from the backup. Check hotspot addresses 
 bash scripts/update.sh
 ```
 
-The updater checks for local changes, backs up the running logger, pulls the current branch with `git pull --ff-only`, and rebuilds the container. It waits for a healthy web server before reporting success. A failed backup stops the update. GUI settings and saved contacts remain in the same data volume. Confirm the new version in the page footer.
+The updater checks for local changes, backs up the running logger, fast-forwards it to the public `main` branch, and rebuilds the container. It waits for a healthy web server before reporting success. A failed backup stops the update. GUI settings and saved contacts remain in the same data volume. Confirm the new version in the page footer.
 
 If you are upgrading from 0.8.0-beta.1 or earlier, run `bash scripts/backup.sh` once before using the old updater; those versions do not back up automatically.
 
 If Git reports local changes or a divergent branch, stop and inspect the changes. Do not fix it with `git reset --hard` unless you understand what it will discard.
+
+### Repair an older beta checkout
+
+Early test installations may still track the removed `hotspot-logger-beta-review` branch. The public repository also has a clean release history, so Git cannot merge the two histories. Keep the existing installation folder: its name is part of how Docker finds the current data volume.
+
+First, make a backup and check the source folder for local changes:
+
+```bash
+bash scripts/backup.sh
+git status --short
+```
+
+If `git status --short` prints anything, stop and save those changes elsewhere. If it prints nothing, replace the old source checkout with the current public branch:
+
+```bash
+git fetch origin main
+git reset --hard origin/main
+git config "branch.$(git branch --show-current).remote" origin
+git config "branch.$(git branch --show-current).merge" refs/heads/main
+bash scripts/update.sh
+```
+
+The reset replaces only tracked repository files. It does not remove the named Docker data volume or the ignored `backups/` folder. Confirm your settings and saved contacts in the browser after the logger starts.
 
 ## Update a ZIP download
 
@@ -80,4 +103,4 @@ After the repository rename, update the remote URL from inside your existing fol
 git remote set-url origin https://github.com/mattatat25/hotspot-logger.git
 ```
 
-If your install tracks the earlier review branch, back up first, then use `git fetch origin`, `git switch main`, and `bash scripts/update.sh`. Do not rename the installation folder.
+If your install tracks the earlier review branch, use the repair steps above. Do not rename the installation folder.

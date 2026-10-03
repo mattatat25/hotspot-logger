@@ -20,7 +20,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-VERSION = "0.8.0-beta.3"
+VERSION = "0.8.0-beta.4"
+ACTIVITY_LIMIT = 50
 UTC = dt.timezone.utc
 CALL = re.compile(r"^[A-Z0-9]{1,4}[0-9][A-Z0-9]{1,5}(?:/[A-Z0-9]{1,8})?$")
 DB_PATH = os.getenv("DB_PATH", "/data/logger.sqlite")
@@ -983,7 +984,7 @@ def dashboard_page(settings, query):
             SUM(CASE WHEN logged_at IS NOT NULL AND COALESCE(log_status,'')!='pending' THEN 1 ELSE 0 END)
             FROM heard WHERE {base_where}""", params).fetchone()
         extra = "" if view == "all" else (" AND (exchange_pattern!='' AND logged_at IS NULL OR log_status='pending')" if view == "exchanges" else " AND logged_at IS NOT NULL AND COALESCE(log_status,'')!='pending'")
-        entries = cx.execute(f"SELECT * FROM heard WHERE {base_where}{extra} ORDER BY heard_utc DESC LIMIT 100", params).fetchall()
+        entries = cx.execute(f"SELECT * FROM heard WHERE {base_where}{extra} ORDER BY heard_utc DESC LIMIT ?", params + [ACTIVITY_LIMIT]).fetchall()
     source = source_settings(settings, selected_hotspot or hotspots[0])
     source_status = []
     for hotspot in ([selected_hotspot] if selected_hotspot else hotspots):
@@ -1029,7 +1030,7 @@ def dashboard_page(settings, query):
         message = "No possible exchanges detected. All activity includes heard stations you can review manually." if view == "exchanges" else ("No saved contacts in this view." if view == "saved" else "No voice activity in this view yet.")
         page.append(f"<tr><td colspan='7' class='empty'>{message}</td></tr>")
     page.append(f"""</tbody></table></div><p class='context'>A/B/A and B/A/B timing can suggest an exchange involving your RF callsign. It is not a confirmed QSO. Only you decide what to log.</p>
-{page_footer('Latest 100 entries in this view · All times UTC')}</main></body></html>""")
+{page_footer(f'Latest {ACTIVITY_LIMIT} entries in this view · All times UTC')}</main></body></html>""")
     return "".join(page)
 
 def removal_page(settings, row=None, count=0, hotspot=None):

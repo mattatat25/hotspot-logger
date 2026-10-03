@@ -191,8 +191,11 @@ class LoggerTests(unittest.TestCase):
                     with urllib.request.urlopen(request) as response:
                         return response.read().decode()
 
-                self.assertIn("Clear queue", get("/"))
-                self.assertIn("Delete", get("/"))
+                dashboard = get("/")
+                self.assertIn("Clear queue", dashboard)
+                self.assertIn("Delete", dashboard)
+                self.assertIn("Latest 50 entries in this view", dashboard)
+                self.assertEqual(dashboard.count("data-label='Station'"), 50)
                 self.assertIn("does not delete a contact from QRZ", get("/delete?id=" + rows[-1][0]))
                 with app.db() as cx:
                     self.assertEqual(cx.execute("SELECT COUNT(*) FROM heard").fetchone()[0], 103)

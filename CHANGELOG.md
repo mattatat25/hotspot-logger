@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0-beta.4
+
+- Update existing installations from the public `main` branch even when the local branch has an older name.
+- Add exact recovery steps for early beta checkouts that still track the removed review branch.
+- Show the latest 50 activity entries instead of 100.
+
 ## 0.8.0-beta.3
 
 - Make possible-exchange detection tolerant of WPSD direction, duration, talkgroup, timeslot, and DG-ID formatting differences.

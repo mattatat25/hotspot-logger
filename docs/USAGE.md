@@ -107,7 +107,7 @@ For manual QRZ import, open the correct QRZ logbook and use its **Settings → I
 
 **Delete** removes one local entry and its ADIF copy after a confirmation page. It does not remove the QSO from QRZ; delete that separately in QRZ if needed. A removed WPSD record stays removed across subsequent polls.
 
-**Clear queue** removes unlogged candidates, including entries beyond the 100 displayed. It keeps saved contacts and uncertain QRZ submissions. A selected hotspot limits the clear to that source. **All hotspots** clears every source. The mode filter does not narrow this action; read the scope on the confirmation page.
+**Clear queue** removes unlogged candidates, including entries beyond the 50 displayed. It keeps saved contacts and uncertain QRZ submissions. A selected hotspot limits the clear to that source. **All hotspots** clears every source. The mode filter does not narrow this action; read the scope on the confirmation page.
 
 ## Handle an uncertain QRZ result
 

@@ -10,7 +10,7 @@ body:
     attributes:
       label: Logger version
       description: Shown in the page footer.
-      placeholder: "0.8.0-beta.3"
+      placeholder: "0.8.0-beta.4"
     validations:
       required: true
   - type: input
