@@ -1,0 +1,113 @@
+name: Build Windows beta
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: windows/requirements-build.txt
+      - name: Install build tools
+        run: |
+          python -m pip install --disable-pip-version-check -r windows/requirements-build.txt
+          python -m pip check
+      - name: Run Windows launcher tests
+        run: python -m unittest tests.test_windows_launcher -v
+      - name: Build branded executable
+        run: |
+          python windows/build_icon.py --output build/branding
+          pyinstaller --noconfirm --clean windows/HotspotLogger.spec
+      - name: Check executable metadata
+        shell: pwsh
+        run: |
+          $info = (Get-Item "dist/HotspotLogger/HotspotLogger.exe").VersionInfo
+          if ($info.ProductName -ne "Hotspot Logger") { throw "Missing product name" }
+          if ($info.ProductVersion -ne "0.8.0-beta.11") { throw "Wrong product version: $($info.ProductVersion)" }
+      - name: Start packaged logger
+        shell: pwsh
+        run: |
+          # Startup mode exercises the packaged tray UI without opening a browser on the runner.
+          $process = Start-Process "dist/HotspotLogger/HotspotLogger.exe" -ArgumentList "--startup" -PassThru
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 20; $attempt++) {
+              try {
+                $health = Invoke-RestMethod "http://127.0.0.1:8787/healthz" -TimeoutSec 1
+                if ($health.version -eq "0.8.0-beta.11" -and $health.configured -eq $false) {
+                  $ready = $true
+                  break
+                }
+              } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $ready) {
+              $logPath = Join-Path $env:LOCALAPPDATA "Hotspot Logger\hotspot-logger.log"
+              if (Test-Path $logPath) { Get-Content $logPath }
+              if ($process.HasExited) { Write-Host "Executable exit code: $($process.ExitCode)" }
+              throw "Packaged logger did not pass its startup check"
+            }
+          } finally {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Write build information
+        shell: pwsh
+        run: |
+          Copy-Item "windows/README-WINDOWS.txt" "dist/HotspotLogger/README-WINDOWS.txt"
+          Copy-Item "LICENSE" "dist/HotspotLogger/LICENSE.txt"
+          @(
+            "Hotspot Logger 0.8.0-beta.11"
+            "Source commit: $env:GITHUB_SHA"
+            "Workflow: $env:GITHUB_WORKFLOW"
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            "Architecture: Windows x64"
+            "Packaging: PyInstaller one-folder, UPX disabled"
+            "Authenticode: not signed (public beta)"
+          ) | Set-Content "dist/HotspotLogger/BUILD-INFO.txt" -Encoding utf8
+          python -m pip freeze | Set-Content "dist/HotspotLogger/BUILD-DEPENDENCIES.txt" -Encoding utf8
+      - name: Attempt Microsoft Defender scan
+        shell: pwsh
+        run: |
+          $defender = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          $result = "Microsoft Defender scan unavailable on this GitHub-hosted runner. Scan the ZIP locally before use."
+          if (Test-Path $defender) {
+            $scanPath = (Resolve-Path "dist/HotspotLogger").Path
+            & $defender -Scan -ScanType 3 -File $scanPath
+            if ($LASTEXITCODE -eq 0) {
+              $result = "Microsoft Defender custom scan completed without a detection."
+            } else {
+              Write-Warning "Microsoft Defender could not complete the custom scan (exit code $LASTEXITCODE)."
+            }
+          } else {
+            Write-Warning "Microsoft Defender command-line scanner is unavailable."
+          }
+          $result | Set-Content "dist/HotspotLogger/SCAN-RESULT.txt" -Encoding utf8
+      - name: Package and checksum
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          $archive = "release/HotspotLogger-Windows-x64-0.8.0-beta.11.zip"
+          Compress-Archive -Path "dist/HotspotLogger" -DestinationPath $archive -CompressionLevel Optimal
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  HotspotLogger-Windows-x64-0.8.0-beta.11.zip" | Set-Content "release/SHA256SUMS.txt" -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hotspot-logger-windows-x64
+          path: release/*
+          if-no-files-found: error
+          retention-days: 14

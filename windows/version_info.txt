@@ -1,0 +1,27 @@
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(0, 8, 0, 11),
+    prodvers=(0, 8, 0, 11),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        '040904B0',
+        [StringStruct('CompanyName', 'KF0WSS'),
+         StringStruct('FileDescription', 'Hotspot Logger'),
+         StringStruct('FileVersion', '0.8.0-beta.11'),
+         StringStruct('InternalName', 'HotspotLogger'),
+         StringStruct('LegalCopyright', 'Copyright 2026 KF0WSS'),
+         StringStruct('OriginalFilename', 'HotspotLogger.exe'),
+         StringStruct('ProductName', 'Hotspot Logger'),
+         StringStruct('ProductVersion', '0.8.0-beta.11')])
+    ]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)

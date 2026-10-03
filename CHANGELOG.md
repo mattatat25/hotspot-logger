@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.0-beta.11
+
+- Keep the Windows logger running in the notification area when its control window is closed.
+- Add tray controls to open the logger, show the control window, restart the server, or exit.
+- Add an optional GUI setting to start the logger in the tray when the user signs in to Windows.
+- Put the Windows download instructions at the top of the README and point them to GitHub Releases.
+
+## 0.8.0-beta.10
+
+- Add a portable Windows x64 package with a small desktop launcher.
+- Keep Windows access on the local computer by default, with an explicit launcher setting for trusted-LAN access.
+- Build the executable as an inspectable one-folder bundle without UPX or code obfuscation.
+- Add an automated Windows startup check, recorded Microsoft Defender scan attempt, build manifest, and SHA-256 checksum.
+
 ## 0.8.0-beta.9
 
 - Refresh dashboard activity, counts, hotspot state, and YSF room without reloading the page.

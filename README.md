@@ -8,7 +8,15 @@ Hotspot Logger keeps a queue of stations heard by your hotspots. After a QSO, op
 
 Run it on an **Ubuntu VM, a Linux computer, or a Raspberry Pi with a 64-bit OS**, then use it from your desktop or phone. All logger settings are entered in the browser.
 
-**Public beta · 0.8.0-beta.9** — Created by **[KF0WSS](https://www.qrz.com/db/KF0WSS)**.
+**Public beta · 0.8.0-beta.11** — Created by **[KF0WSS](https://www.qrz.com/db/KF0WSS)**.
+
+## Download for Windows
+
+**Want to run Hotspot Logger on Windows? Go to [Releases](https://github.com/mattatat25/hotspot-logger/releases) and download the file named `HotspotLogger-Windows-x64-0.8.0-beta.11.zip` under Assets.** Do not use GitHub's automatic **Source code** ZIP; that is for developers and does not contain the runnable Windows app.
+
+Extract the ZIP, open the `HotspotLogger` folder, and double-click `HotspotLogger.exe`. Windows does not need Python, Docker, Git, or a configuration file. The app keeps running in the notification area beside the clock when its control window is closed. See the [Windows guide](docs/WINDOWS.md).
+
+The beta is not code-signed. If Windows SmartScreen opens **Windows protected your PC**, select **More info**, confirm the app is `HotspotLogger.exe`, then select **Run anyway**. Only do this for a ZIP downloaded from this repository's Releases page after checking its SHA-256 value against `SHA256SUMS.txt`; never disable Windows Security.
 
 ## Install
 
@@ -78,7 +86,7 @@ Keep a copy outside the server. Backups contain your settings, credentials, and 
 
 | Guide | What you will find |
 | --- | --- |
-| [Install](docs/INSTALL.md) | Ubuntu, Raspberry Pi, Docker, and first-run setup |
+| [Install](docs/INSTALL.md) | Windows, Ubuntu, Raspberry Pi, Docker, and first-run setup |
 | [Use the logger](docs/USAGE.md) | Settings, modes, rooms, contact review, and QRZ results |
 | [Back up and update](docs/BACKUP-AND-UPDATES.md) | Backup, restore, upgrades, and moving servers |
 | [Troubleshoot](docs/TROUBLESHOOTING.md) | Connection, login, time, and logging problems |

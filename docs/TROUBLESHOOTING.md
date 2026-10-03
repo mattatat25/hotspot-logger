@@ -36,7 +36,7 @@ Another application may already use port 8787. Run `sudo ss -ltnp 'sport = :8787
 
 ## Git asks for credentials
 
-Check that the clone URL is `https://github.com/mattatat25/hotspot-logger.git`. Public source downloads do not need a GitHub account. If you have access to a private preview, use a GitHub SSH key or token; an account password will not authenticate Git.
+Check that the clone URL is `https://github.com/mattatat25/hotspot-logger.git`. Public source downloads do not need a GitHub account. If you use a private fork, authenticate with a GitHub SSH key or token; an account password will not authenticate Git.
 
 ## Login keeps failing after changing Settings
 

@@ -2,6 +2,8 @@
 
 The logger runs on a computer that can reach your WPSD hotspots. Use a browser on your desktop or phone to set it up and review contacts. The server itself does not need a desktop environment.
 
+Windows users can run the portable beta without Docker or Python. Follow the [Windows guide](WINDOWS.md).
+
 ## Choose a host
 
 | Host | Starting point |
@@ -9,6 +11,7 @@ The logger runs on a computer that can reach your WPSD hotspots. Use a browser o
 | Raspberry Pi | Pi 4 or Pi 5, 2 GB RAM, Raspberry Pi OS Lite **64-bit**, 16 GB or larger storage |
 | Ubuntu VM | Ubuntu Server 24.04 or 26.04 LTS, 2 vCPUs, 2 GB RAM, 20 GB disk |
 | Existing Linux Docker host | Docker Engine and a current Docker Compose plugin, with port 8787 available |
+| Windows beta | 64-bit Windows 10 or 11, with port 8787 available |
 
 These are practical starting allocations, not performance benchmarks. On Unraid, put the Ubuntu VM on a bridged network so it receives its own LAN address. Use a separate Pi for the logger rather than adding software to your WPSD hotspot.
 

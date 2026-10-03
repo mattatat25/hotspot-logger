@@ -51,7 +51,7 @@ def main():
     assert wait_for_server()["configured"] is True
     assert "Created by" in request("/")
     assert "KF0WSS" in request("/")
-    assert docker_python("import os; print(oct(os.stat('/data/logger.sqlite').st_mode & 0o777))") == '0o600' 
+    assert docker_python("import os; print(oct(os.stat('/data/logger.sqlite').st_mode & 0o777))") == '0o600'
     docker_python("""import sqlite3
 with sqlite3.connect('/data/logger.sqlite') as cx:
     cx.execute(\"INSERT INTO heard(id,call,mode,target,direction,heard_utc,duration,raw,first_seen,logged_at,log_status,log_adif) VALUES('smoke','W1ABC','DMR','91','Net','2026-10-01T00:00:00+00:00','8','{}','2026-10-01','2026-10-01','save','<CALL:5>W1ABC<EOR>')\")

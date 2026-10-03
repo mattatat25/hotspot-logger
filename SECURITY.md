@@ -4,7 +4,7 @@ Hotspot Logger is built for one operator on a trusted home network.
 
 ## Network access
 
-Port **8787** is published on all host interfaces. Complete initial setup promptly: anyone who can reach a new installation can configure it. Do not forward this port through your router. Use a private VPN or an HTTPS reverse proxy for remote access.
+Linux and Docker installations publish port **8787** on all host interfaces. The Windows beta listens only on the same computer unless **Allow other devices on my trusted network** is enabled in its launcher. Complete initial setup promptly whenever LAN access is enabled: anyone who can reach a new installation can configure it. Do not forward this port through your router. Use a private VPN or an HTTPS reverse proxy for remote access.
 
 The app uses HTTP Basic authentication. Plain HTTP does not encrypt passwords or settings in transit. There is no built-in login rate limiter. Docker-published ports may bypass UFW rules; follow [Docker's firewall guidance](https://docs.docker.com/engine/network/packet-filtering-firewalls/).
 

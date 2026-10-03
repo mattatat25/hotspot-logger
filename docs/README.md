@@ -4,7 +4,8 @@ Start with [installation](INSTALL.md), then [using the logger](USAGE.md).
 
 | Guide | Covers |
 | --- | --- |
-| [Install](INSTALL.md) | Ubuntu, Raspberry Pi, Docker, and browser setup |
+| [Install](INSTALL.md) | Ubuntu, Raspberry Pi, Docker, Windows beta, and browser setup |
+| [Windows beta](WINDOWS.md) | Download, first run, LAN access, updates, backups, and trust warnings |
 | [Use the logger](USAGE.md) | Settings, contact review, rooms, modes, and QRZ |
 | [Back up and update](BACKUP-AND-UPDATES.md) | Backup, restore, upgrades, and moving hosts |
 | [Troubleshoot](TROUBLESHOOTING.md) | Common problems and diagnostics |

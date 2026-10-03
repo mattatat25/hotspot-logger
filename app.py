@@ -20,7 +20,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
-VERSION = "0.8.0-beta.9"
+VERSION = "0.8.0-beta.11"
 ACTIVITY_LIMIT = 50
 MAX_QUEUE_ENTRIES = 50
 MAX_ACTIVITY_PER_HOTSPOT = 5000
