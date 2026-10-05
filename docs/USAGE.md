@@ -27,7 +27,7 @@ Rename a hotspot freely. Removing one stops polling but keeps its entries. If yo
 4. Copy the **Logbook API key** into the logger's Settings.
 5. Save Settings.
 
-This is the logbook key, not your QRZ password or XML callsign-lookup credentials. API inserts require an XML-level subscription or higher. Without that access, leave the key blank and use ADIF.
+This is the logbook key, not your QRZ password or XML callsign-lookup credentials. **QRZ Logbook API inserts require a paid QRZ subscription with API access (XML level or higher); a free QRZ account is not sufficient.** Without that access, leave the key blank and use ADIF.
 
 A blank key field keeps an existing key. Check **Remove the saved QRZ key** to delete it. Password fields work the same way: leave both blank to keep the password, or enter and repeat a new one of at least eight characters.
 
