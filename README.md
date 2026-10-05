@@ -50,7 +50,7 @@ See the [installation guide](docs/INSTALL.md) for Pi imaging, SSH, other Docker 
 
 **Heard only** means the station appeared in WPSD. **Possible exchange** means the logger saw A/B/A or B/A/B activity involving your RF callsign. It can miss contacts or flag unrelated activity; you decide whether a QSO took place.
 
-QRZ uploads need a Logbook API key and an eligible subscription. You can leave the key blank and use **ADIF export** instead. [QRZ setup instructions](docs/USAGE.md#set-up-qrz)
+QRZ uploads need a Logbook API key **and a paid QRZ subscription with Logbook API access (XML level or higher)**. A free QRZ account cannot upload through the API. You can leave the key blank and use **ADIF export** instead. [QRZ setup instructions](docs/USAGE.md#set-up-qrz)
 
 ## What it does
 
